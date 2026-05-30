@@ -7,6 +7,8 @@ import {
 import { getProductionOrderRecord, getProductionOrders } from "@/lib/production/orders";
 import { getSicarCatalogOptions } from "@/lib/sicar/catalog";
 
+export const dynamic = "force-dynamic";
+
 type CostingPageProps = {
   searchParams: Promise<{
     id?: string;

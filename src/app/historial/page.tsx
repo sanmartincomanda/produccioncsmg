@@ -4,6 +4,8 @@ import { HistoryToolbar } from "@/components/history/history-toolbar";
 import { getProductionHistory } from "@/lib/production/data";
 import { formatCurrency } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 type HistoryPageProps = {
   searchParams: Promise<{
     dateFrom?: string;

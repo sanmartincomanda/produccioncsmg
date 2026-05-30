@@ -4,6 +4,8 @@ import { CatalogExplorer } from "@/components/catalog/catalog-explorer";
 import { Reveal } from "@/components/ui/reveal";
 import { getSicarCatalog } from "@/lib/sicar/catalog";
 
+export const dynamic = "force-dynamic";
+
 export default async function CatalogPage() {
   const initialData = await getSicarCatalog({
     status: "all",

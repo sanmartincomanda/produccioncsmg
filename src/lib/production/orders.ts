@@ -413,12 +413,17 @@ export async function getSicarPostingPreviews(): Promise<SicarPostingPreview[]> 
       return {
         productionOrderId: record.productionOrderId,
         folio: record.folio,
+        status: record.status,
         workflowStage: record.workflowStage,
         sourceProductLabel: record.draft.sourceProduct
           ? `${record.draft.sourceProduct.clave} - ${record.draft.sourceProduct.descripcion}`
           : "Sin producto base",
+        sourceWeight: parseNumber(record.draft.sourceWeight),
         totalProducedWeight: totals.producedWeight,
         totalCost: totals.totalCost,
+        outputCount: totals.outputs.length,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
         sourceConsumption: record.draft.sourceProduct
           ? [
               {

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tools\\node.cmd ./node_modules/next/dist/bin/next dev --webpack",
-    "build": "tools\\node.cmd ./node_modules/next/dist/bin/next build --webpack",
-    "start": "tools\\node.cmd ./node_modules/next/dist/bin/next start",
-    "lint": "tools\\node.cmd ./node_modules/eslint/bin/eslint.js .",
-    "db:migrate": "tools\\node.cmd scripts/run-migrations.mjs"
+    "dev": "pnpm exec next dev --webpack",
+    "build": "pnpm exec next build --webpack",
+    "start": "pnpm exec next start",
+    "lint": "pnpm exec eslint .",
+    "db:migrate": "pnpm exec node scripts/run-migrations.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

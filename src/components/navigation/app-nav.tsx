@@ -19,7 +19,7 @@ export function AppNav() {
 
   return (
     <nav className="space-y-2">
-      {navigation.map((item) => {
+      {navigation.map((item, index) => {
         const Icon = item.icon;
         const isActive = pathname === item.href;
 
@@ -28,14 +28,44 @@ export function AppNav() {
             key={item.href}
             href={item.href}
             className={cn(
-              "group flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-all duration-300",
+              "group relative flex items-center gap-3 overflow-hidden rounded-[22px] border px-4 py-3.5 text-sm transition-all duration-300",
               isActive
-                ? "border-cyan-200 bg-cyan-50 text-slate-950 shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)]"
-                : "border-slate-800/10 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950",
+                ? "border-cyan-300/35 bg-[linear-gradient(135deg,rgba(11,89,122,0.95),rgba(14,116,144,0.92))] text-white shadow-[0_24px_36px_-28px_rgba(8,145,178,0.85)]"
+                : "border-white/10 bg-white/5 text-slate-200 hover:border-white/18 hover:bg-white/8",
             )}
           >
-            <Icon className={cn("size-4", isActive ? "text-cyan-700" : "text-slate-400")} />
-            <span>{item.label}</span>
+            <span className="pointer-events-none absolute inset-y-0 left-0 w-px bg-white/18" />
+            <span
+              className={cn(
+                "inline-flex size-8 items-center justify-center rounded-xl border transition-all duration-300",
+                isActive
+                  ? "border-white/15 bg-white/12 text-white"
+                  : "border-white/8 bg-white/6 text-slate-300 group-hover:text-white",
+              )}
+            >
+              <Icon className="size-4" />
+            </span>
+
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="block truncate font-medium">{item.label}</span>
+                <span
+                  className={cn(
+                    "mt-1 block text-[10px] uppercase tracking-[0.22em]",
+                    isActive ? "text-cyan-100/80" : "text-slate-400",
+                  )}
+                >
+                  modulo {String(index + 1).padStart(2, "0")}
+                </span>
+              </div>
+
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full transition-all duration-300",
+                  isActive ? "bg-cyan-200 shadow-[0_0_0_5px_rgba(103,232,249,0.15)]" : "bg-white/20",
+                )}
+              />
+            </div>
           </Link>
         );
       })}

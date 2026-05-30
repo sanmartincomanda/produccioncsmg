@@ -68,6 +68,17 @@ export type ManualCostItem = {
   notes: string;
 };
 
+export type ScalePreset = {
+  scaleId: number;
+  name: string;
+  portName: string;
+  baudRate: number;
+  pollDelayMs: number;
+  commandSequence: string;
+  useCarriageReturn: number;
+  dataBits: number;
+};
+
 export type ProductionHistoryRow = {
   productionOrderId: number;
   folio: string;
@@ -153,10 +164,15 @@ export type ProductionRecipeTemplate = {
 export type SicarPostingPreview = {
   productionOrderId: number;
   folio: string;
+  status: string;
   workflowStage: ProductionWorkflowStage;
   sourceProductLabel: string;
+  sourceWeight: number;
   totalProducedWeight: number;
   totalCost: number;
+  outputCount: number;
+  createdAt: string;
+  updatedAt: string;
   sourceConsumption: Array<{
     label: string;
     quantity: number;

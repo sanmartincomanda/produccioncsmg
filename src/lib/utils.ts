@@ -16,3 +16,10 @@ export function formatCurrency(value: number | string) {
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
 }
+
+export function formatDateTime(value: string | Date) {
+  return new Intl.DateTimeFormat("es-NI", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}

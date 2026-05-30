@@ -6,6 +6,8 @@ import { getConfigurationOverview } from "@/lib/production/data";
 import { getSicarCatalogOptions } from "@/lib/sicar/catalog";
 import { getSicarScalePresets } from "@/lib/overview";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const [catalogOptions, configurationOverview, scalePresets] = await Promise.all([
     getSicarCatalogOptions(),

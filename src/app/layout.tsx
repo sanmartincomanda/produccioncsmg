@@ -35,24 +35,26 @@ export default function RootLayout({
         <FirebaseAnalyticsProvider />
         <div className="min-h-screen px-4 py-5 lg:px-6">
           <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-[1600px] gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
-            <aside className="ink-card flex flex-col justify-between overflow-hidden">
-              <div className="space-y-8">
+            <aside className="ink-card relative flex flex-col justify-between overflow-hidden">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.24),transparent_72%)]" />
+
+              <div className="relative space-y-8">
                 <div className="space-y-4">
                   <Link href="/" className="inline-flex items-center gap-3">
-                    <span className="inline-flex size-11 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-700">
+                    <span className="inline-flex size-11 items-center justify-center rounded-2xl border border-cyan-300/35 bg-cyan-300/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
                       <DatabaseZap className="size-5" />
                     </span>
                     <div>
-                      <p className="font-display text-xl tracking-wide text-slate-950">Transformación</p>
-                      <p className="text-sm text-slate-500">Producción conectada a SICAR</p>
+                      <p className="font-display text-xl tracking-[0.04em] text-white">Transformacion</p>
+                      <p className="text-sm text-slate-300">Produccion conectada a SICAR</p>
                     </div>
                   </Link>
 
                   <div className="flex flex-wrap gap-2">
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
-                      Catálogo SICAR
+                    <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1 text-xs text-slate-200">
+                      Catalogo SICAR
                     </span>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+                    <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1 text-xs text-slate-200">
                       VRN editable
                     </span>
                   </div>
@@ -61,16 +63,16 @@ export default function RootLayout({
                 <AppNav />
               </div>
 
-              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-slate-700">
-                <div className="flex items-center gap-2 text-emerald-700">
+              <div className="relative rounded-3xl border border-emerald-400/20 bg-emerald-400/8 p-4 text-sm text-slate-200">
+                <div className="flex items-center gap-2 text-emerald-300">
                   <ShieldCheck className="size-4" />
                   <span>Modo seguro</span>
                 </div>
-                <p className="mt-2 text-xs">Historial propio y controlado.</p>
+                <p className="mt-2 text-xs text-slate-300">Historial propio y controlado.</p>
               </div>
             </aside>
 
-            <main className="min-w-0 rounded-[32px] border border-white/50 bg-white/70 p-4 shadow-[0_40px_90px_-50px_rgba(15,23,42,0.2)] sm:p-6">
+            <main className="min-w-0 rounded-[34px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(246,250,253,0.98))] p-4 shadow-[0_44px_110px_-58px_rgba(15,23,42,0.28)] sm:p-6">
               {children}
             </main>
           </div>
