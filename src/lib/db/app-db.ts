@@ -2,7 +2,7 @@ import "server-only";
 
 import mysql, { type Pool } from "mysql2/promise";
 
-import { env } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 
 const globalForAppDb = globalThis as {
   appPool?: Pool;
@@ -10,6 +10,7 @@ const globalForAppDb = globalThis as {
 
 export function getAppPool() {
   if (!globalForAppDb.appPool) {
+    const env = getEnv();
     globalForAppDb.appPool = mysql.createPool({
       host: env.APP_MYSQL_HOST,
       port: env.APP_MYSQL_PORT,

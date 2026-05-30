@@ -2,7 +2,7 @@ import "server-only";
 
 import mysql, { type Pool } from "mysql2/promise";
 
-import { env } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 
 const globalForSicar = globalThis as {
   sicarPool?: Pool;
@@ -10,6 +10,7 @@ const globalForSicar = globalThis as {
 
 export function getSicarPool() {
   if (!globalForSicar.sicarPool) {
+    const env = getEnv();
     globalForSicar.sicarPool = mysql.createPool({
       host: env.SICAR_MYSQL_HOST,
       port: env.SICAR_MYSQL_PORT,

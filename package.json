@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm exec next dev --webpack",
-    "build": "pnpm exec next build --webpack",
-    "start": "pnpm exec next start",
-    "lint": "pnpm exec eslint .",
-    "db:migrate": "pnpm exec node scripts/run-migrations.mjs"
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint .",
+    "db:migrate": "node scripts/run-migrations.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

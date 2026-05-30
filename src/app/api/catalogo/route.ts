@@ -9,12 +9,25 @@ export async function GET(request: NextRequest) {
   const page = Number(searchParams.get("page") ?? "1");
   const limit = Number(searchParams.get("limit") ?? "24");
 
-  const data = await getSicarCatalog({
-    q,
-    status,
-    page,
-    limit,
-  });
+  try {
+    const data = await getSicarCatalog({
+      q,
+      status,
+      page,
+      limit,
+    });
 
-  return NextResponse.json(data);
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        rows: [],
+        total: 0,
+        page,
+        limit,
+        error: error instanceof Error ? error.message : "SICAR no disponible.",
+      },
+      { status: 503 },
+    );
+  }
 }
