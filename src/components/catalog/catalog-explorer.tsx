@@ -1,8 +1,9 @@
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, Search, SlidersHorizontal } from "lucide-react";
 
+import { listCloudCatalogPageData } from "@/lib/firebase/cloud-data";
 import type { SicarCatalogItem, SicarCatalogResult } from "@/lib/sicar/catalog";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 
@@ -15,66 +16,99 @@ type StatusFilter = "all" | "active" | "inactive";
 export function CatalogExplorer({ initialData }: CatalogExplorerProps) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(initialData.page);
+  const [page, setPage] = useState(initialData.page || 1);
+  const [allRows, setAllRows] = useState(initialData.rows);
   const [data, setData] = useState(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search);
+  const pageLimit = initialData.limit || 24;
 
   useEffect(() => {
-    const controller = new AbortController();
-    const params = new URLSearchParams({
-      q: deferredSearch,
-      status,
-      page: String(page),
-      limit: String(data.limit),
-    });
+    let cancelled = false;
 
-    async function loadCatalog() {
+    async function loadCloudCatalog() {
       startTransition(() => {
         setLoading(true);
         setError(null);
       });
 
       try {
-        const response = await fetch(`/api/catalogo?${params.toString()}`, {
-          signal: controller.signal,
-        });
+        const nextData = await listCloudCatalogPageData();
 
-        if (!response.ok) {
-          throw new Error("No fue posible consultar el catalogo de SICAR.");
+        if (!cancelled) {
+          startTransition(() => {
+            setAllRows(nextData.rows);
+          });
         }
-
-        const nextData = (await response.json()) as SicarCatalogResult;
-
-        startTransition(() => {
-          setData(nextData);
-        });
       } catch (fetchError) {
-        if (fetchError instanceof Error && fetchError.name === "AbortError") {
-          return;
+        if (!cancelled) {
+          startTransition(() => {
+            setError(
+              fetchError instanceof Error
+                ? fetchError.message
+                : "No fue posible consultar el catálogo en la nube.",
+            );
+          });
         }
-
-        startTransition(() => {
-          setError(
-            fetchError instanceof Error
-              ? fetchError.message
-              : "No fue posible consultar el catalogo de SICAR.",
-          );
-        });
       } finally {
-        startTransition(() => {
-          setLoading(false);
-        });
+        if (!cancelled) {
+          startTransition(() => {
+            setLoading(false);
+          });
+        }
       }
     }
 
-    void loadCatalog();
+    void loadCloudCatalog();
 
-    return () => controller.abort();
-  }, [data.limit, deferredSearch, page, status]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const totalPages = Math.max(Math.ceil(data.total / data.limit), 1);
+  const filteredRows = useMemo(() => {
+    const query = deferredSearch.trim().toLowerCase();
+
+    return allRows.filter((item) => {
+      const matchesStatus =
+        status === "all" ? true : status === "active" ? item.status === 1 : item.status !== 1;
+
+      if (!matchesStatus) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return [item.clave, item.descripcion, item.unidadVenta, item.caracteristicas]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [allRows, deferredSearch, status]);
+
+  const totalPages = Math.max(Math.ceil(filteredRows.length / pageLimit), 1);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(1);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    const startIndex = (page - 1) * pageLimit;
+
+    startTransition(() => {
+      setData({
+        rows: filteredRows.slice(startIndex, startIndex + pageLimit),
+        total: filteredRows.length,
+        page,
+        limit: pageLimit,
+      });
+    });
+  }, [filteredRows, page, pageLimit]);
 
   return (
     <div className="space-y-6">

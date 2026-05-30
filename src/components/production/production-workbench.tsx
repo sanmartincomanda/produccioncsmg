@@ -19,6 +19,13 @@ import {
 } from "lucide-react";
 
 import {
+  createCloudProductionOrder,
+  listCloudCatalogOptions,
+  listCloudManualCostItems,
+  listCloudRecipes,
+  listCloudScalePresets,
+} from "@/lib/firebase/cloud-data";
+import {
   createDraftFromRecipeTemplate,
   createDraftInput,
   createDraftOutput,
@@ -150,6 +157,10 @@ export function ProductionWorkbench({
 }: ProductionWorkbenchProps) {
   const router = useRouter();
   const [draft, setDraft] = useState<ProductionDraft>(createEmptyProductionDraft());
+  const [liveCatalogOptions, setLiveCatalogOptions] = useState<CatalogOption[]>(catalogOptions);
+  const [liveManualCostItems, setLiveManualCostItems] = useState<ManualCostItem[]>(manualCostItems);
+  const [liveRecipeTemplates, setLiveRecipeTemplates] = useState<ProductionRecipeTemplate[]>(recipeTemplates);
+  const [liveScalePresets, setLiveScalePresets] = useState<ScalePreset[]>(scalePresets);
   const [station, setStation] = useState<TouchStationState>(() => createEmptyTouchStationState(scalePresets));
   const [isSaving, setIsSaving] = useState(false);
   const [catalogDrawer, setCatalogDrawer] = useState<CatalogDrawerState>(null);
@@ -163,6 +174,43 @@ export function ProductionWorkbench({
     tone: "neutral",
     message: "Lista para capturar.",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudData() {
+      try {
+        const [nextCatalog, nextManualCosts, nextRecipes, nextScalePresets] = await Promise.all([
+          listCloudCatalogOptions(),
+          listCloudManualCostItems(),
+          listCloudRecipes(),
+          listCloudScalePresets(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLiveCatalogOptions(nextCatalog);
+        setLiveManualCostItems(nextManualCosts);
+        setLiveRecipeTemplates(nextRecipes);
+        setLiveScalePresets(nextScalePresets);
+      } catch {
+        // If Firebase is not available we keep the initial payload from the server.
+      }
+    }
+
+    void loadCloudData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const availableCatalogOptions = liveCatalogOptions.length > 0 ? liveCatalogOptions : catalogOptions;
+  const availableManualCostItems = liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
+  const availableRecipeTemplates = liveRecipeTemplates.length > 0 ? liveRecipeTemplates : recipeTemplates;
+  const availableScalePresets = liveScalePresets.length > 0 ? liveScalePresets : scalePresets;
 
   useEffect(() => {
     const rawDraft = window.localStorage.getItem(PRODUCTION_DRAFT_STORAGE_KEY);
@@ -215,7 +263,7 @@ export function ProductionWorkbench({
         window.localStorage.removeItem(TOUCH_STATION_STORAGE_KEY);
       }
     }
-  }, [scalePresets]);
+  }, [availableScalePresets]);
 
   useEffect(() => {
     window.localStorage.setItem(PRODUCTION_DRAFT_STORAGE_KEY, JSON.stringify(draft));
@@ -252,14 +300,17 @@ export function ProductionWorkbench({
   );
 
   const activeScale = useMemo(
-    () => scalePresets.find((item) => item.scaleId === station.selectedScaleId) ?? scalePresets[0] ?? null,
-    [scalePresets, station.selectedScaleId],
+    () =>
+      availableScalePresets.find((item) => item.scaleId === station.selectedScaleId) ??
+      availableScalePresets[0] ??
+      null,
+    [availableScalePresets, station.selectedScaleId],
   );
 
   const filteredCatalog = useMemo(() => {
     const normalizedQuery = catalogQuery.trim().toLowerCase();
 
-    return catalogOptions
+    return availableCatalogOptions
       .filter((item) => {
         if (!normalizedQuery) {
           return true;
@@ -270,7 +321,7 @@ export function ProductionWorkbench({
           .includes(normalizedQuery);
       })
       .slice(0, 32);
-  }, [catalogOptions, catalogQuery]);
+  }, [availableCatalogOptions, catalogQuery]);
 
   const piecesByOutput = useMemo(() => {
     return recentCaptures.reduce<Record<string, number>>((accumulator, capture) => {
@@ -289,7 +340,7 @@ export function ProductionWorkbench({
 
   function resetAll() {
     const nextDraft = createEmptyProductionDraft();
-    const nextStation = createEmptyTouchStationState(scalePresets);
+    const nextStation = createEmptyTouchStationState(availableScalePresets);
     setDraft(nextDraft);
     setStation(nextStation);
     window.localStorage.setItem(PRODUCTION_DRAFT_STORAGE_KEY, JSON.stringify(nextDraft));
@@ -562,23 +613,7 @@ export function ProductionWorkbench({
     });
 
     try {
-      const response = await fetch("/api/producciones", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ draft: payloadDraft }),
-      });
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        folio?: string;
-        error?: string;
-      };
-
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "No se pudo grabar la produccion.");
-      }
+      const result = await createCloudProductionOrder(payloadDraft);
 
       resetAll();
       setSaveFeedback({
@@ -640,8 +675,8 @@ export function ProductionWorkbench({
                     }
                     className="h-12 w-full rounded-[18px] border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-500"
                   >
-                    {scalePresets.length === 0 ? <option value="">Manual</option> : null}
-                    {scalePresets.map((scalePreset) => (
+                    {availableScalePresets.length === 0 ? <option value="">Manual</option> : null}
+                    {availableScalePresets.map((scalePreset) => (
                       <option key={scalePreset.scaleId} value={scalePreset.scaleId}>
                         {scalePreset.name}
                       </option>
@@ -934,7 +969,7 @@ export function ProductionWorkbench({
       <AnimatePresence>
         {isRecipeModalOpen ? (
           <RecipeModal
-            recipes={recipeTemplates}
+            recipes={availableRecipeTemplates}
             activeRecipeId={draft.recipeId}
             onClose={() => setIsRecipeModalOpen(false)}
             onSelect={applyRecipe}
@@ -946,7 +981,7 @@ export function ProductionWorkbench({
         {isInputsModalOpen ? (
           <InputsModal
             inputs={draft.inputs}
-            manualCostItems={manualCostItems}
+            manualCostItems={availableManualCostItems}
             onClose={() => setIsInputsModalOpen(false)}
             onChange={(nextInputs) =>
               setDraft((current) => ({

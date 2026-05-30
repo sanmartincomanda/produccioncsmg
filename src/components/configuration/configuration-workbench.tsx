@@ -1,10 +1,16 @@
 "use client";
 
-import { startTransition, useState } from "react";
-import { useRouter } from "next/navigation";
+import { startTransition, useEffect, useState } from "react";
 import { Database, Plus, Save } from "lucide-react";
 
 import { ArticlePicker } from "@/components/fields/article-picker";
+import {
+  listCloudArticleProfiles,
+  listCloudCatalogOptions,
+  listCloudManualCostItems,
+  saveCloudArticleProfile,
+  saveCloudManualCostItem,
+} from "@/lib/firebase/cloud-data";
 import { formatCurrency } from "@/lib/utils";
 import type { ArticleProfileDefault, CatalogOption, ManualCostItem } from "@/types/production";
 
@@ -43,7 +49,9 @@ export function ConfigurationWorkbench({
   profiles,
   manualCostItems,
 }: ConfigurationWorkbenchProps) {
-  const router = useRouter();
+  const [liveCatalogOptions, setLiveCatalogOptions] = useState<CatalogOption[]>(catalogOptions);
+  const [liveProfiles, setLiveProfiles] = useState<ArticleProfileDefault[]>(profiles);
+  const [liveManualCostItems, setLiveManualCostItems] = useState<ManualCostItem[]>(manualCostItems);
   const [selectedArticle, setSelectedArticle] = useState<CatalogOption | null>(null);
   const [profileRole, setProfileRole] = useState<(typeof profileRoles)[number]["value"]>("FINISHED_GOOD");
   const [costingMode, setCostingMode] = useState<(typeof costingModes)[number]["value"]>("VRN_PRODUCED");
@@ -57,6 +65,39 @@ export function ConfigurationWorkbench({
   const [manualCurrentCost, setManualCurrentCost] = useState("");
   const [manualNotes, setManualNotes] = useState("");
   const [saving, setSaving] = useState<null | "profile" | "manual">(null);
+  const availableCatalogOptions = liveCatalogOptions.length > 0 ? liveCatalogOptions : catalogOptions;
+  const availableProfiles = liveProfiles.length > 0 ? liveProfiles : profiles;
+  const availableManualCostItems = liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudData() {
+      try {
+        const [nextCatalog, nextProfiles, nextManualCosts] = await Promise.all([
+          listCloudCatalogOptions(),
+          listCloudArticleProfiles(),
+          listCloudManualCostItems(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLiveCatalogOptions(nextCatalog);
+        setLiveProfiles(nextProfiles);
+        setLiveManualCostItems(nextManualCosts);
+      } catch {
+        // Keep initial payload if Firebase is not available yet.
+      }
+    }
+
+    void loadCloudData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function saveProfile() {
     if (!selectedArticle) {
@@ -66,25 +107,22 @@ export function ConfigurationWorkbench({
     setSaving("profile");
 
     try {
-      await fetch("/api/configuracion/article-profiles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sicarArtId: selectedArticle.artId,
-          productionRole: profileRole,
-          vrnPercentage: Number(vrnPercentage || 0),
-          costingMode,
-          manualCost: manualCost ? Number(manualCost) : null,
-          notes: profileNotes,
-        }),
+      await saveCloudArticleProfile({
+        sicarArtId: selectedArticle.artId,
+        articleLabel: `${selectedArticle.clave} - ${selectedArticle.descripcion}`,
+        productionRole: profileRole,
+        vrnPercentage: Number(vrnPercentage || 0),
+        costingMode,
+        manualCost: manualCost ? Number(manualCost) : null,
+        notes: profileNotes,
       });
+      setLiveProfiles(await listCloudArticleProfiles().catch(() => availableProfiles));
 
       startTransition(() => {
         setSelectedArticle(null);
         setVrnPercentage("");
         setManualCost("");
         setProfileNotes("");
-        router.refresh();
       });
     } finally {
       setSaving(null);
@@ -99,18 +137,15 @@ export function ConfigurationWorkbench({
     setSaving("manual");
 
     try {
-      await fetch("/api/configuracion/manual-cost-items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: manualCode,
-          name: manualName,
-          unitName: manualUnit,
-          costType: manualType,
-          currentCost: Number(manualCurrentCost || 0),
-          notes: manualNotes,
-        }),
+      await saveCloudManualCostItem({
+        code: manualCode,
+        name: manualName,
+        unitName: manualUnit,
+        costType: manualType,
+        currentCost: Number(manualCurrentCost || 0),
+        notes: manualNotes,
       });
+      setLiveManualCostItems(await listCloudManualCostItems().catch(() => availableManualCostItems));
 
       startTransition(() => {
         setManualCode("");
@@ -119,7 +154,6 @@ export function ConfigurationWorkbench({
         setManualType("OTHER");
         setManualCurrentCost("");
         setManualNotes("");
-        router.refresh();
       });
     } finally {
       setSaving(null);
@@ -142,7 +176,7 @@ export function ConfigurationWorkbench({
         <ArticlePicker
           label="Artículo del catálogo"
           value={selectedArticle}
-          options={catalogOptions}
+          options={availableCatalogOptions}
           onChange={setSelectedArticle}
         />
 
@@ -191,11 +225,11 @@ export function ConfigurationWorkbench({
         </button>
 
         <div className="space-y-3">
-          {profiles.length === 0 ? (
+          {availableProfiles.length === 0 ? (
             <EmptyState text="Todavía no hay clasificaciones guardadas." />
           ) : null}
 
-          {profiles.map((profile) => (
+          {availableProfiles.map((profile) => (
             <div key={profile.articleProfileId} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
               <p className="font-medium text-slate-900">{profile.articleLabel}</p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -250,11 +284,11 @@ export function ConfigurationWorkbench({
         </button>
 
         <div className="space-y-3">
-          {manualCostItems.length === 0 ? (
+          {availableManualCostItems.length === 0 ? (
             <EmptyState text="Todavía no hay costos manuales guardados." />
           ) : null}
 
-          {manualCostItems.map((item) => (
+          {availableManualCostItems.map((item) => (
             <div key={item.manualCostItemId} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>

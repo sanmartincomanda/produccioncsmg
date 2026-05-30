@@ -5,6 +5,7 @@ import type { PoolConnection } from "mysql2/promise";
 import { z } from "zod";
 
 import { getAppPool } from "@/lib/db/app-db";
+import { directMysqlWebError, isDirectMysqlWebEnabled } from "@/lib/server/direct-mysql-web";
 
 const articleSchema = z.object({
   artId: z.coerce.number().int().positive(),
@@ -70,6 +71,10 @@ function buildRecipeCode(name: string, articleCode: string) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!isDirectMysqlWebEnabled()) {
+    return NextResponse.json({ ok: false, error: directMysqlWebError() }, { status: 503 });
+  }
+
   let connection: PoolConnection | null = null;
 
   try {

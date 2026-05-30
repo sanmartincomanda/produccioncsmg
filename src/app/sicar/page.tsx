@@ -1,10 +1,7 @@
 import { SicarControlCenter } from "@/components/sicar/sicar-control-center";
-import { getSicarPostingPreviews } from "@/lib/production/orders";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
 
-export default async function SicarPage() {
-  const previews = await getSicarPostingPreviews();
-
-  return <SicarControlCenter previews={previews} />;
+export default function SicarPage() {
+  return <SicarControlCenter previews={[]} />;
 }

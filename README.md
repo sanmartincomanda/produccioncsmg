@@ -1,12 +1,12 @@
 # produccioncsmg
 
-Aplicacion web base para controlar transformaciones de inventario conectadas en vivo a SICAR por MySQL.
+Aplicacion web base para controlar transformaciones de inventario con frontend en Firebase y un integrador local para SICAR.
 
 ## Objetivo
 
-- Leer el catalogo real de `sicar`.
-- Administrar recetas, ordenes de produccion y configuraciones propias en una base auxiliar separada.
-- Registrar consumo de materias primas y entrada de producto terminado usando ajustes de inventario de SICAR.
+- Leer el catalogo real de `sicar` desde un integrador local.
+- Administrar recetas, ordenes de produccion y configuraciones en Firebase.
+- Preparar consumo de materias primas y entrada de producto terminado para ajuste controlado en SICAR.
 - Calcular costo producido con estrategia VRN.
 - Mantener trazabilidad seria por orden, movimiento y costo.
 
@@ -34,16 +34,19 @@ Aplicacion web base para controlar transformaciones de inventario conectadas en 
 pnpm install
 pnpm db:migrate
 pnpm dev
+pnpm integrator:once
+pnpm integrator:run
 ```
 
 ## Variables de entorno
 
-La app usa dos conexiones:
+La web usa `NEXT_PUBLIC_FIREBASE_*`.
 
-- `SICAR_*` para lectura y futura escritura controlada sobre la base `sicar`
-- `APP_*` para la base auxiliar `transformacion_app`
-- `NEXT_PUBLIC_FIREBASE_*` para el proyecto web de Firebase y Analytics del lado cliente
-- `FIREBASE_ADMIN_CREDENTIALS_PATH` para la service account del backend
+El integrador local usa:
+
+- `FIREBASE_ADMIN_CREDENTIALS_PATH`
+- `SICAR_*`
+- `APP_*` si mantienes la base auxiliar MySQL
 
 ## Firebase
 
@@ -58,3 +61,4 @@ Archivo guia: [`.env.example`](.env.example)
 
 - Analisis y arquitectura: [`docs/sicar-analisis-y-arquitectura.md`](docs/sicar-analisis-y-arquitectura.md)
 - Migracion inicial: [`db/migrations/001_init.sql`](db/migrations/001_init.sql)
+- Integrador local: [`integrator/README.md`](integrator/README.md)

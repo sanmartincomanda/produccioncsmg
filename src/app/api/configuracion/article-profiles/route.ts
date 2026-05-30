@@ -3,6 +3,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 
 import { getAppPool } from "@/lib/db/app-db";
+import { directMysqlWebError, isDirectMysqlWebEnabled } from "@/lib/server/direct-mysql-web";
 
 const articleProfileSchema = z.object({
   sicarArtId: z.coerce.number().int().positive(),
@@ -14,6 +15,10 @@ const articleProfileSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  if (!isDirectMysqlWebEnabled()) {
+    return NextResponse.json({ ok: false, error: directMysqlWebError() }, { status: 503 });
+  }
+
   const payload = articleProfileSchema.parse(await request.json());
   const pool = getAppPool();
 

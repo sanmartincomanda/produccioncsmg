@@ -2,17 +2,10 @@ import { Boxes } from "lucide-react";
 
 import { CatalogExplorer } from "@/components/catalog/catalog-explorer";
 import { Reveal } from "@/components/ui/reveal";
-import { getSicarCatalog } from "@/lib/sicar/catalog";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
 
-export default async function CatalogPage() {
-  const initialData = await getSicarCatalog({
-    status: "all",
-    page: 1,
-    limit: 24,
-  });
-
+export default function CatalogPage() {
   return (
     <div className="space-y-6">
       <Reveal className="surface-card">
@@ -21,17 +14,23 @@ export default async function CatalogPage() {
             <Boxes className="size-5" />
           </span>
           <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-cyan-700">Catalogo base</p>
-            <h1 className="font-display text-3xl text-slate-950">Todos los productos de SICAR</h1>
+            <p className="text-xs uppercase tracking-[0.32em] text-cyan-700">Catálogo base</p>
+            <h1 className="font-display text-3xl text-slate-950">Todos los productos sincronizados</h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
-              Esta vista es el punto de partida para enlazar recetas, perfiles de articulo,
-              configuracion de VRN y futuras ordenes de produccion.
+              La web consulta Firebase. El integrador local alimenta el catálogo desde SICAR.
             </p>
           </div>
         </div>
       </Reveal>
 
-      <CatalogExplorer initialData={initialData} />
+      <CatalogExplorer
+        initialData={{
+          rows: [],
+          total: 0,
+          page: 1,
+          limit: 24,
+        }}
+      />
     </div>
   );
 }

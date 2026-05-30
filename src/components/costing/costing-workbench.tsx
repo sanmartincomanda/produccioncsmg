@@ -7,6 +7,16 @@ import { ChevronDown, Plus, Save, Trash2 } from "lucide-react";
 
 import { ArticlePicker } from "@/components/fields/article-picker";
 import {
+  getCloudProductionOrderRecord,
+  listCloudArticleProfiles,
+  listCloudCatalogOptions,
+  listCloudManualCostItems,
+  listCloudProductionOrders,
+  listCloudRecipes,
+  saveCloudRecipe,
+  updateCloudProductionOrderCosting,
+} from "@/lib/firebase/cloud-data";
+import {
   createDraftFromRecipeTemplate,
   createDraftInput,
   createDraftManualCost,
@@ -31,6 +41,7 @@ type CostingWorkbenchProps = {
   manualCostItems: ManualCostItem[];
   orders: ProductionOrderListItem[];
   recipes: ProductionRecipeTemplate[];
+  selectedOrderId?: number | null;
   selectedOrder: ProductionOrderRecord | null;
 };
 
@@ -48,9 +59,16 @@ export function CostingWorkbench({
   manualCostItems,
   orders,
   recipes,
-  selectedOrder,
+  selectedOrderId,
+  selectedOrder: initialSelectedOrder,
 }: CostingWorkbenchProps) {
   const router = useRouter();
+  const [liveArticleProfiles, setLiveArticleProfiles] = useState<ArticleProfileDefault[]>(articleProfiles);
+  const [liveCatalogOptions, setLiveCatalogOptions] = useState<CatalogOption[]>(catalogOptions);
+  const [liveManualCostItems, setLiveManualCostItems] = useState<ManualCostItem[]>(manualCostItems);
+  const [liveOrders, setLiveOrders] = useState<ProductionOrderListItem[]>(orders);
+  const [liveRecipes, setLiveRecipes] = useState<ProductionRecipeTemplate[]>(recipes);
+  const [liveSelectedOrder, setLiveSelectedOrder] = useState<ProductionOrderRecord | null>(initialSelectedOrder);
   const [draft, setDraft] = useState<ProductionDraft>(createEmptyProductionDraft());
   const [isSavingCosting, setIsSavingCosting] = useState(false);
   const [isSavingRecipe, setIsSavingRecipe] = useState(false);
@@ -62,29 +80,87 @@ export function CostingWorkbench({
     message: "Selecciona una producción guardada, ajusta el costeo y luego guárdalo.",
   });
 
+  const availableArticleProfiles =
+    liveArticleProfiles.length > 0 ? liveArticleProfiles : articleProfiles;
+  const availableCatalogOptions = liveCatalogOptions.length > 0 ? liveCatalogOptions : catalogOptions;
+  const availableManualCostItems =
+    liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
+  const availableOrders = liveOrders.length > 0 ? liveOrders : orders;
+  const availableRecipes = liveRecipes.length > 0 ? liveRecipes : recipes;
+  const effectiveSelectedOrder = liveSelectedOrder ?? initialSelectedOrder;
+  const selectedOrder = effectiveSelectedOrder;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudData() {
+      try {
+        const [nextProfiles, nextCatalog, nextManualCosts, nextOrders, nextRecipes] = await Promise.all([
+          listCloudArticleProfiles(),
+          listCloudCatalogOptions(),
+          listCloudManualCostItems(),
+          listCloudProductionOrders(),
+          listCloudRecipes(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLiveArticleProfiles(nextProfiles);
+        setLiveCatalogOptions(nextCatalog);
+        setLiveManualCostItems(nextManualCosts);
+        setLiveOrders(nextOrders);
+        setLiveRecipes(nextRecipes);
+
+        const nextOrderId =
+          selectedOrderId ??
+          liveSelectedOrder?.productionOrderId ??
+          selectedOrder?.productionOrderId ??
+          nextOrders[0]?.productionOrderId;
+
+        if (nextOrderId) {
+          const nextSelectedOrder = await getCloudProductionOrderRecord(nextOrderId).catch(() => null);
+          if (!cancelled) {
+            setLiveSelectedOrder(nextSelectedOrder);
+          }
+        }
+      } catch {
+        // Keep initial props when Firebase is not available.
+      }
+    }
+
+    void loadCloudData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [liveSelectedOrder?.productionOrderId, selectedOrder?.productionOrderId, selectedOrderId]);
+
   useEffect(() => {
     startTransition(() => {
-      setDraft(selectedOrder?.draft ?? createEmptyProductionDraft());
+      setDraft(effectiveSelectedOrder?.draft ?? createEmptyProductionDraft());
     });
-  }, [selectedOrder]);
+  }, [effectiveSelectedOrder]);
 
-  const totals = calculateProductionTotals(draft, articleProfiles);
+  const totals = calculateProductionTotals(draft, availableArticleProfiles);
   const todayLabel = new Intl.DateTimeFormat("es-NI", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const detailTitle = selectedOrder
-    ? `${selectedOrder.folio}${draft.sourceProduct?.descripcion ? ` · ${draft.sourceProduct.descripcion.toUpperCase()}` : ""}`
+  const detailTitle = effectiveSelectedOrder
+    ? `${effectiveSelectedOrder.folio}${draft.sourceProduct?.descripcion ? ` · ${draft.sourceProduct.descripcion.toUpperCase()}` : ""}`
     : "COSTEO VRN";
   const realCostPerPound = totals.producedWeight > 0 ? totals.totalCost / totals.producedWeight : 0;
+  const selectedOrderFolio = effectiveSelectedOrder?.folio ?? selectedOrder?.folio ?? "";
   const selectedOrderMeta = useMemo(
-    () => orders.find((item) => item.productionOrderId === selectedOrder?.productionOrderId) ?? null,
-    [orders, selectedOrder],
+    () => availableOrders.find((item) => item.productionOrderId === effectiveSelectedOrder?.productionOrderId) ?? null,
+    [availableOrders, effectiveSelectedOrder],
   );
 
   function updateOutputArticle(outputId: string, nextArtId: string) {
-    const nextArticle = catalogOptions.find((item) => item.artId === Number(nextArtId)) ?? null;
+    const nextArticle = availableCatalogOptions.find((item) => item.artId === Number(nextArtId)) ?? null;
 
     setDraft((current) => ({
       ...current,
@@ -93,7 +169,7 @@ export function CostingWorkbench({
   }
 
   function updateInputArticle(inputId: string, nextArtId: string) {
-    const nextItem = manualCostItems.find((item) => item.manualCostItemId === Number(nextArtId));
+    const nextItem = availableManualCostItems.find((item) => item.manualCostItemId === Number(nextArtId));
 
     setDraft((current) => ({
       ...current,
@@ -112,7 +188,7 @@ export function CostingWorkbench({
   }
 
   async function handleSaveCosting() {
-    if (!selectedOrder) {
+    if (!effectiveSelectedOrder) {
       setFeedback({
         tone: "error",
         message: "Primero selecciona una producción guardada para costear.",
@@ -127,25 +203,22 @@ export function CostingWorkbench({
     });
 
     try {
-      const response = await fetch(`/api/producciones/${selectedOrder.productionOrderId}/costeo`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ draft }),
-      });
-
-      const result = (await response.json()) as ApiResult;
-
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "No se pudo guardar el costeo.");
-      }
+      await updateCloudProductionOrderCosting(
+        effectiveSelectedOrder.productionOrderId,
+        draft,
+        availableArticleProfiles,
+      );
+      setLiveOrders(await listCloudProductionOrders().catch(() => availableOrders));
+      setLiveSelectedOrder(
+        await getCloudProductionOrderRecord(effectiveSelectedOrder.productionOrderId).catch(
+          () => effectiveSelectedOrder,
+        ),
+      );
 
       setFeedback({
         tone: "success",
-        message: `Costeo guardado en ${selectedOrder.folio}. Esta producción ya queda lista para el módulo SICAR.`,
+        message: `Costeo guardado en ${selectedOrderFolio}. Esta producción ya queda lista para el módulo SICAR.`,
       });
-      router.refresh();
     } catch (error) {
       setFeedback({
         tone: "error",
@@ -180,35 +253,11 @@ export function CostingWorkbench({
     });
 
     try {
-      const response = await fetch("/api/recetas", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recipeId: draft.recipeId,
-          name: draft.recipeName.trim(),
-          draft,
-        }),
-      });
-
-      const responseText = await response.text();
-      let result: ApiResult = { ok: false };
-
-      if (responseText) {
-        try {
-          result = JSON.parse(responseText) as ApiResult;
-        } catch {
-          result = {
-            ok: false,
-            error: "La API de recetas devolvió una respuesta inválida.",
-          };
-        }
-      }
-
-      if (!response.ok || !result.ok) {
-        throw new Error(result.error || "No se pudo guardar la receta.");
-      }
+      const result = (await saveCloudRecipe({
+        recipeId: draft.recipeId,
+        name: draft.recipeName.trim(),
+        draft,
+      })) as ApiResult;
 
       setDraft((current) => ({
         ...current,
@@ -216,11 +265,11 @@ export function CostingWorkbench({
         recipeCode: result.recipeCode ?? current.recipeCode,
         recipeName: result.recipeName ?? current.recipeName,
       }));
+      setLiveRecipes(await listCloudRecipes().catch(() => availableRecipes));
       setFeedback({
         tone: "success",
         message: "Receta guardada. La producción sigue abierta para ajustar su costeo.",
       });
-      router.refresh();
     } catch (error) {
       setFeedback({
         tone: "error",
@@ -232,7 +281,7 @@ export function CostingWorkbench({
   }
 
   function handleLoadRecipe(recipeId: number) {
-    const recipe = recipes.find((item) => item.recipeId === recipeId);
+    const recipe = availableRecipes.find((item) => item.recipeId === recipeId);
 
     if (!recipe) {
       return;
@@ -296,7 +345,7 @@ export function CostingWorkbench({
                 className="h-14 rounded-2xl border border-[#dcc9a2] bg-[#fffdf8] px-4 text-sm text-[#2d2118] outline-none transition focus:border-[#b78d39]"
               >
                 <option value="">Seleccionar producción</option>
-                {orders.map((order) => (
+                {availableOrders.map((order) => (
                   <option key={order.productionOrderId} value={order.productionOrderId}>
                     {order.folio} · {order.sourceLabel}
                   </option>
@@ -333,7 +382,7 @@ export function CostingWorkbench({
                 <ArticlePicker
                   label="Producto base"
                   value={draft.sourceProduct}
-                  options={catalogOptions}
+                  options={availableCatalogOptions}
                   onChange={(nextArticle) =>
                     setDraft((current) => ({
                       ...current,
@@ -419,7 +468,7 @@ export function CostingWorkbench({
                         className="h-12 rounded-2xl border border-[#dcc9a2] bg-[#fffdf8] px-4 text-sm text-[#2d2118] outline-none transition focus:border-[#b78d39]"
                       >
                         <option value="">Recetas archivadas</option>
-                        {recipes.map((recipe) => (
+                        {availableRecipes.map((recipe) => (
                           <option key={recipe.recipeId} value={recipe.recipeId}>
                             {recipe.name} {recipe.code ? `(${recipe.code})` : ""}
                           </option>
@@ -515,7 +564,7 @@ export function CostingWorkbench({
                                   className="h-11 w-full rounded-2xl border border-[#dcc9a2] bg-[#fffdf8] px-4 text-sm font-medium text-[#2d2118] outline-none transition focus:border-[#b78d39]"
                                 >
                                   <option value="">Seleccionar producto</option>
-                                  {catalogOptions.map((item) => (
+                                  {availableCatalogOptions.map((item) => (
                                     <option key={item.artId} value={item.artId}>
                                       {item.clave} - {item.descripcion}
                                     </option>
@@ -650,7 +699,7 @@ export function CostingWorkbench({
                             className="h-11 rounded-2xl border border-[#dcc9a2] bg-white px-4 text-sm text-[#2d2118] outline-none transition focus:border-[#b78d39]"
                           >
                             <option value="">Seleccionar insumo</option>
-                            {manualCostItems.map((item) => (
+                            {availableManualCostItems.map((item) => (
                               <option key={item.manualCostItemId} value={item.manualCostItemId}>
                                 {item.code} - {item.name}
                               </option>
@@ -734,7 +783,7 @@ export function CostingWorkbench({
                           <select
                             value={manualCost.manualCostItemId ?? ""}
                             onChange={(event) => {
-                              const nextItem = manualCostItems.find(
+                              const nextItem = availableManualCostItems.find(
                                 (item) => item.manualCostItemId === Number(event.target.value),
                               );
 
@@ -752,7 +801,7 @@ export function CostingWorkbench({
                             className="h-11 rounded-2xl border border-[#dcc9a2] bg-white px-4 text-sm text-[#2d2118] outline-none transition focus:border-[#b78d39]"
                           >
                             <option value="">Libre</option>
-                            {manualCostItems.map((item) => (
+                            {availableManualCostItems.map((item) => (
                               <option key={item.manualCostItemId} value={item.manualCostItemId}>
                                 {item.code} - {item.name}
                               </option>

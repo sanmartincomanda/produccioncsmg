@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "db:migrate": "node scripts/run-migrations.mjs"
+    "db:migrate": "node scripts/run-migrations.mjs",
+    "integrator:run": "node integrator/firebase-sicar-integrator.mjs",
+    "integrator:once": "node integrator/firebase-sicar-integrator.mjs --once"
   },
   "dependencies": {
     "clsx": "^2.1.1",

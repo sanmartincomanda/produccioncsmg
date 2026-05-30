@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDownCircle,
@@ -16,6 +16,10 @@ import {
   X,
 } from "lucide-react";
 
+import {
+  listCloudArticleProfiles,
+  listCloudSicarPostingPreviews,
+} from "@/lib/firebase/cloud-data";
 import type { SicarPostingPreview } from "@/types/production";
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@/lib/utils";
 
@@ -50,21 +54,53 @@ type SicarControlCenterProps = {
 };
 
 export function SicarControlCenter({ previews }: SicarControlCenterProps) {
+  const [livePreviews, setLivePreviews] = useState<SicarPostingPreview[]>(previews);
+  const [loading, setLoading] = useState(previews.length === 0);
   const [selectedId, setSelectedId] = useState<number | null>(previews[0]?.productionOrderId ?? null);
   const [openedId, setOpenedId] = useState<number | null>(null);
+  const availablePreviews = livePreviews.length > 0 ? livePreviews : previews;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudPreviews() {
+      try {
+        const articleProfiles = await listCloudArticleProfiles();
+        const nextPreviews = await listCloudSicarPostingPreviews(articleProfiles);
+
+        if (!cancelled) {
+          setLivePreviews(nextPreviews);
+          setSelectedId((current) => current ?? nextPreviews[0]?.productionOrderId ?? null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadCloudPreviews();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedPreview = useMemo(
-    () => previews.find((preview) => preview.productionOrderId === selectedId) ?? previews[0] ?? null,
-    [previews, selectedId],
+    () =>
+      availablePreviews.find((preview) => preview.productionOrderId === selectedId) ??
+      availablePreviews[0] ??
+      null,
+    [availablePreviews, selectedId],
   );
 
   const openedPreview = useMemo(
-    () => previews.find((preview) => preview.productionOrderId === openedId) ?? null,
-    [openedId, previews],
+    () => availablePreviews.find((preview) => preview.productionOrderId === openedId) ?? null,
+    [availablePreviews, openedId],
   );
 
   const dashboardTotals = useMemo(() => {
-    return previews.reduce(
+    return availablePreviews.reduce(
       (acc, preview) => {
         acc.orders += 1;
         acc.weight += preview.totalProducedWeight;
@@ -74,9 +110,13 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
       },
       { orders: 0, weight: 0, cost: 0, outputs: 0 },
     );
-  }, [previews]);
+  }, [availablePreviews]);
 
-  if (previews.length === 0) {
+  if (loading) {
+    return <section className="module-card text-center text-sm text-slate-500">Cargando producciones...</section>;
+  }
+
+  if (availablePreviews.length === 0) {
     return (
       <section className="module-card text-center">
         <ShieldCheck className="mx-auto size-10 text-slate-300" />
@@ -138,7 +178,7 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
           </div>
 
           <div className="max-h-[760px] space-y-2 overflow-y-auto px-3 py-3">
-            {previews.map((preview, index) => {
+            {availablePreviews.map((preview, index) => {
               const isActive = preview.productionOrderId === selectedPreview?.productionOrderId;
 
               return (
