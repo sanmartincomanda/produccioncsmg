@@ -153,6 +153,12 @@ function mapCatalogItemDoc(snapshot: QueryDocumentSnapshot): SicarCatalogItem {
     existencia: String(data.existencia ?? 0),
     precioCompra: String(data.precioCompra ?? 0),
     preCompraProm: String(data.preCompraProm ?? 0),
+    categoryId:
+      data.categoryId === null || data.categoryId === undefined ? null : toNumber(data.categoryId),
+    categoryName: String(data.categoryName ?? ""),
+    departmentId:
+      data.departmentId === null || data.departmentId === undefined ? null : toNumber(data.departmentId),
+    departmentName: String(data.departmentName ?? ""),
     unidadCompra: String(data.unidadCompra ?? ""),
     unidadVenta: String(data.unidadVenta ?? ""),
   };
@@ -167,6 +173,10 @@ function toCatalogOption(item: SicarCatalogItem): CatalogOption {
     existencia: Number(item.existencia ?? 0),
     precioCompra: Number(item.precioCompra ?? 0),
     preCompraProm: Number(item.preCompraProm ?? 0),
+    categoryId: item.categoryId,
+    categoryName: item.categoryName,
+    departmentId: item.departmentId,
+    departmentName: item.departmentName,
   };
 }
 

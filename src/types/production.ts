@@ -6,6 +6,10 @@ export type CatalogOption = {
   existencia: number;
   precioCompra: number;
   preCompraProm: number;
+  categoryId?: number | null;
+  categoryName?: string;
+  departmentId?: number | null;
+  departmentName?: string;
 };
 
 export type DraftArticleRef = CatalogOption | null;

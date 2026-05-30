@@ -73,6 +73,16 @@ function normalizeArticle(article: unknown): DraftArticleRef {
     existencia: Number(candidate.existencia ?? 0),
     precioCompra: Number(candidate.precioCompra ?? 0),
     preCompraProm: Number(candidate.preCompraProm ?? 0),
+    categoryId:
+      candidate.categoryId === null || candidate.categoryId === undefined
+        ? null
+        : Number(candidate.categoryId ?? 0),
+    categoryName: String(candidate.categoryName ?? ""),
+    departmentId:
+      candidate.departmentId === null || candidate.departmentId === undefined
+        ? null
+        : Number(candidate.departmentId ?? 0),
+    departmentName: String(candidate.departmentName ?? ""),
   };
 }
 

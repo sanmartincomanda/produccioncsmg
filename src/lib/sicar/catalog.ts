@@ -25,6 +25,10 @@ export type SicarCatalogItem = {
   existencia: string;
   precioCompra: string;
   preCompraProm: string;
+  categoryId: number | null;
+  categoryName: string;
+  departmentId: number | null;
+  departmentName: string;
   unidadCompra: string;
   unidadVenta: string;
 };
@@ -44,11 +48,17 @@ export async function getSicarCatalogOptions(): Promise<CatalogOption[]> {
         a.art_id AS artId,
         a.clave,
         a.descripcion,
+        a.cat_id AS categoryId,
+        c.nombre AS categoryName,
+        c.dep_id AS departmentId,
+        d.nombre AS departmentName,
         uv.nombre AS unidadVenta,
         a.existencia,
         a.precioCompra,
         a.preCompraProm
       FROM articulo a
+      LEFT JOIN categoria c ON c.cat_id = a.cat_id
+      LEFT JOIN departamento d ON d.dep_id = c.dep_id
       LEFT JOIN unidad uv ON uv.uni_id = a.unidadVenta
       ORDER BY a.clave ASC
     `,
@@ -62,6 +72,11 @@ export async function getSicarCatalogOptions(): Promise<CatalogOption[]> {
     existencia: Number(row.existencia ?? 0),
     precioCompra: Number(row.precioCompra ?? 0),
     preCompraProm: Number(row.preCompraProm ?? 0),
+    categoryId: row.categoryId === null || row.categoryId === undefined ? null : Number(row.categoryId),
+    categoryName: String(row.categoryName ?? ""),
+    departmentId:
+      row.departmentId === null || row.departmentId === undefined ? null : Number(row.departmentId),
+    departmentName: String(row.departmentName ?? ""),
   }));
 }
 
@@ -119,9 +134,15 @@ export async function getSicarCatalog(
         a.existencia,
         a.precioCompra,
         a.preCompraProm,
+        a.cat_id AS categoryId,
+        c.nombre AS categoryName,
+        c.dep_id AS departmentId,
+        d.nombre AS departmentName,
         uc.nombre AS unidadCompra,
         uv.nombre AS unidadVenta
       FROM articulo a
+      LEFT JOIN categoria c ON c.cat_id = a.cat_id
+      LEFT JOIN departamento d ON d.dep_id = c.dep_id
       LEFT JOIN unidad uc ON uc.uni_id = a.unidadCompra
       LEFT JOIN unidad uv ON uv.uni_id = a.unidadVenta
       ${whereSql}

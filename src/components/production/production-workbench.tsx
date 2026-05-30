@@ -12,6 +12,7 @@ import {
   Save,
   Scale,
   Search,
+  Star,
   Trash2,
   Undo2,
   Wifi,
@@ -19,6 +20,18 @@ import {
 } from "lucide-react";
 
 import { CatalogSyncPanel } from "@/components/catalog/catalog-sync-panel";
+import {
+  ALL_FILTER,
+  FAVORITES_FILTER,
+  MOST_USED_FILTER,
+  filterCatalogOptions,
+  getCatalogDepartmentFilters,
+  getCatalogUsageCount,
+  isCatalogFavorite,
+  readCatalogBrowserPreferences,
+  registerCatalogUsage,
+  toggleCatalogFavorite,
+} from "@/lib/catalog/browser-preferences";
 import {
   createCloudProductionOrder,
   listCloudCatalogOptions,
@@ -301,22 +314,6 @@ export function ProductionWorkbench({
       null,
     [availableScalePresets, station.selectedScaleId],
   );
-
-  const filteredCatalog = useMemo(() => {
-    const normalizedQuery = catalogQuery.trim().toLowerCase();
-
-    return availableCatalogOptions
-      .filter((item) => {
-        if (!normalizedQuery) {
-          return true;
-        }
-
-        return `${item.clave} ${item.descripcion} ${item.unidadVenta}`
-          .toLowerCase()
-          .includes(normalizedQuery);
-      })
-      .slice(0, 32);
-  }, [availableCatalogOptions, catalogQuery]);
 
   const piecesByOutput = useMemo(() => {
     return recentCaptures.reduce<Record<string, number>>((accumulator, capture) => {
@@ -957,7 +954,7 @@ export function ProductionWorkbench({
                 : "Seleccionar producto que entra"
             }
             query={catalogQuery}
-            options={filteredCatalog}
+            options={availableCatalogOptions}
             onClose={() => setCatalogDrawer(null)}
             onQueryChange={setCatalogQuery}
             onSelect={handleCatalogPick}
@@ -1130,6 +1127,23 @@ function CatalogSelectorModal({
   onQueryChange: (value: string) => void;
   onSelect: (article: CatalogOption) => void;
 }) {
+  const [activeFilter, setActiveFilter] = useState(ALL_FILTER);
+  const [preferences, setPreferences] = useState(() => readCatalogBrowserPreferences());
+  const categoryFilters = useMemo(() => getCatalogDepartmentFilters(options), [options]);
+  const filteredOptions = useMemo(
+    () => filterCatalogOptions(options, query, activeFilter, preferences).slice(0, 48),
+    [activeFilter, options, preferences, query],
+  );
+
+  function handleSelect(option: CatalogOption) {
+    setPreferences((current) => registerCatalogUsage(option.artId, current));
+    onSelect(option);
+  }
+
+  function handleToggleFavorite(artId: number) {
+    setPreferences((current) => toggleCatalogFavorite(artId, current));
+  }
+
   return (
     <ModalShell title={title} onClose={onClose}>
       <div className="border-b border-slate-200 px-6 py-4">
@@ -1142,30 +1156,123 @@ function CatalogSelectorModal({
             className="h-14 w-full rounded-[18px] border border-slate-300 bg-white pl-11 pr-4 text-sm outline-none transition focus:border-cyan-300"
           />
         </label>
+
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          <FilterChip active={activeFilter === ALL_FILTER} onClick={() => setActiveFilter(ALL_FILTER)}>
+            Todos
+          </FilterChip>
+          <FilterChip
+            active={activeFilter === FAVORITES_FILTER}
+            onClick={() => setActiveFilter(FAVORITES_FILTER)}
+          >
+            Favoritos
+          </FilterChip>
+          <FilterChip
+            active={activeFilter === MOST_USED_FILTER}
+            onClick={() => setActiveFilter(MOST_USED_FILTER)}
+          >
+            Más usados
+          </FilterChip>
+          {categoryFilters.map((category) => (
+            <FilterChip
+              key={category}
+              active={activeFilter === category}
+              onClick={() => setActiveFilter(category)}
+            >
+              {category}
+            </FilterChip>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {options.map((option) => (
+          {filteredOptions.map((option) => {
+            const favorite = isCatalogFavorite(option.artId, preferences);
+            const usageCount = getCatalogUsageCount(option.artId, preferences);
+
+            return (
             <button
               key={option.artId}
               type="button"
-              onClick={() => onSelect(option)}
+              onClick={() => handleSelect(option)}
               className="rounded-[22px] border border-slate-200 bg-white p-4 text-left transition hover:border-cyan-200 hover:bg-cyan-50/40"
             >
-              <p className="font-medium text-slate-950">{option.descripcion}</p>
-              <p className="mt-2 text-sm text-slate-500">{option.clave}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-950">{option.descripcion}</p>
+                  <p className="mt-2 text-sm text-slate-500">{option.clave}</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleToggleFavorite(option.artId);
+                  }}
+                  className={cn(
+                    "inline-flex size-9 shrink-0 items-center justify-center rounded-full border transition",
+                    favorite
+                      ? "border-amber-200 bg-amber-50 text-amber-600"
+                      : "border-slate-200 bg-white text-slate-400",
+                  )}
+                >
+                  <Star className={cn("size-4", favorite ? "fill-current" : "")} />
+                </button>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                  {(option.departmentName || "OTROS").toUpperCase()}
+                </span>
+                {option.categoryName ? (
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+                    {option.categoryName}
+                  </span>
+                ) : null}
+                {usageCount > 0 ? (
+                  <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-cyan-700">
+                    {usageCount} usos
+                  </span>
+                ) : null}
+              </div>
             </button>
-          ))}
+            );
+          })}
         </div>
 
-        {options.length === 0 ? (
+        {filteredOptions.length === 0 ? (
           <div className="rounded-[22px] border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
             Sin resultados
           </div>
         ) : null}
       </div>
     </ModalShell>
+  );
+}
+
+function FilterChip({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "whitespace-nowrap rounded-full border px-3 py-2 text-xs font-medium transition",
+        active
+          ? "border-slate-950 bg-slate-950 text-white"
+          : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

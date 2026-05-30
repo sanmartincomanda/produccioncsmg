@@ -154,9 +154,15 @@ async function syncCatalogItems() {
       a.existencia,
       a.precioCompra,
       a.preCompraProm,
+      a.cat_id AS categoryId,
+      c.nombre AS categoryName,
+      c.dep_id AS departmentId,
+      d.nombre AS departmentName,
       uc.nombre AS unidadCompra,
       uv.nombre AS unidadVenta
     FROM articulo a
+    LEFT JOIN categoria c ON c.cat_id = a.cat_id
+    LEFT JOIN departamento d ON d.dep_id = c.dep_id
     LEFT JOIN unidad uc ON uc.uni_id = a.unidadCompra
     LEFT JOIN unidad uv ON uv.uni_id = a.unidadVenta
     ORDER BY a.clave ASC
@@ -183,6 +189,11 @@ async function syncCatalogItems() {
         existencia: String(row.existencia ?? 0),
         precioCompra: String(row.precioCompra ?? 0),
         preCompraProm: String(row.preCompraProm ?? 0),
+        categoryId: row.categoryId === null || row.categoryId === undefined ? null : Number(row.categoryId),
+        categoryName: String(row.categoryName ?? ""),
+        departmentId:
+          row.departmentId === null || row.departmentId === undefined ? null : Number(row.departmentId),
+        departmentName: String(row.departmentName ?? ""),
         unidadCompra: String(row.unidadCompra ?? ""),
         unidadVenta: String(row.unidadVenta ?? ""),
         syncedAt: nowIso(),
