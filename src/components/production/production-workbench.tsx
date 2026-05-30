@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Boxes,
@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 
+import { CatalogSyncPanel } from "@/components/catalog/catalog-sync-panel";
 import {
   createCloudProductionOrder,
   listCloudCatalogOptions,
@@ -175,37 +176,31 @@ export function ProductionWorkbench({
     message: "Lista para capturar.",
   });
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshCloudData = useCallback(async () => {
+    try {
+      const [nextCatalog, nextManualCosts, nextRecipes, nextScalePresets] = await Promise.all([
+        listCloudCatalogOptions(),
+        listCloudManualCostItems(),
+        listCloudRecipes(),
+        listCloudScalePresets(),
+      ]);
 
-    async function loadCloudData() {
-      try {
-        const [nextCatalog, nextManualCosts, nextRecipes, nextScalePresets] = await Promise.all([
-          listCloudCatalogOptions(),
-          listCloudManualCostItems(),
-          listCloudRecipes(),
-          listCloudScalePresets(),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setLiveCatalogOptions(nextCatalog);
-        setLiveManualCostItems(nextManualCosts);
-        setLiveRecipeTemplates(nextRecipes);
-        setLiveScalePresets(nextScalePresets);
-      } catch {
-        // If Firebase is not available we keep the initial payload from the server.
-      }
+      setLiveCatalogOptions(nextCatalog);
+      setLiveManualCostItems(nextManualCosts);
+      setLiveRecipeTemplates(nextRecipes);
+      setLiveScalePresets(nextScalePresets);
+    } catch {
+      // If Firebase is not available we keep the initial payload from the server.
     }
-
-    void loadCloudData();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshCloudData();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [refreshCloudData]);
 
   const availableCatalogOptions = liveCatalogOptions.length > 0 ? liveCatalogOptions : catalogOptions;
   const availableManualCostItems = liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
@@ -637,6 +632,10 @@ export function ProductionWorkbench({
         <section className="module-card flex min-h-0 flex-col p-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <div className="grid gap-3">
+              {availableCatalogOptions.length === 0 ? (
+                <CatalogSyncPanel compact onSynced={refreshCloudData} />
+              ) : null}
+
               <button
                 type="button"
                 onClick={() => openCatalogDrawer({ kind: "source" })}

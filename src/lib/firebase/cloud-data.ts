@@ -35,12 +35,25 @@ import type {
 const COLLECTIONS = {
   articleProfiles: "article_profiles",
   catalogItems: "catalog_items",
+  integratorRuntime: "integrator_runtime",
   manualCostItems: "manual_cost_items",
   productionOrders: "production_orders",
   recipes: "recipes",
   scalePresets: "scale_presets",
+  syncRequests: "sync_requests",
   systemMeta: "system_meta",
 } as const;
+
+export type CloudCatalogSyncState = {
+  integratorStatus: string | null;
+  integratorMode: string | null;
+  integratorHost: string | null;
+  catalogRows: number;
+  catalogSyncedAt: string | null;
+  lastErrorMessage: string | null;
+  requestStatus: string | null;
+  requestUpdatedAt: string | null;
+};
 
 type CloudRecipeSavePayload = {
   recipeId?: number | null;
@@ -431,6 +444,51 @@ export async function listCloudCatalogPageData(): Promise<SicarCatalogResult> {
     page: 1,
     limit: Math.max(rows.length, 1),
   };
+}
+
+export async function getCloudCatalogSyncState(): Promise<CloudCatalogSyncState> {
+  const db = getDb();
+  const [runtimeSnapshot, requestSnapshot] = await Promise.all([
+    getDoc(doc(db, COLLECTIONS.integratorRuntime, "main")),
+    getDoc(doc(db, COLLECTIONS.syncRequests, "catalog")),
+  ]);
+
+  const runtimeData = (runtimeSnapshot.data() ?? {}) as Record<string, unknown>;
+  const requestData = (requestSnapshot.data() ?? {}) as Record<string, unknown>;
+  const catalogData =
+    typeof runtimeData.catalog === "object" && runtimeData.catalog !== null
+      ? (runtimeData.catalog as Record<string, unknown>)
+      : {};
+
+  return {
+    integratorStatus: typeof runtimeData.status === "string" ? runtimeData.status : null,
+    integratorMode: typeof runtimeData.mode === "string" ? runtimeData.mode : null,
+    integratorHost: typeof runtimeData.host === "string" ? runtimeData.host : null,
+    catalogRows: toNumber(catalogData.rows),
+    catalogSyncedAt: catalogData.syncedAt ? toIso(catalogData.syncedAt) : null,
+    lastErrorMessage:
+      typeof runtimeData.lastErrorMessage === "string" ? runtimeData.lastErrorMessage : null,
+    requestStatus: typeof requestData.status === "string" ? requestData.status : null,
+    requestUpdatedAt: requestData.updatedAt ? toIso(requestData.updatedAt) : null,
+  };
+}
+
+export async function requestCloudCatalogSync() {
+  const db = getDb();
+  const now = nowIso();
+
+  await setDoc(
+    doc(db, COLLECTIONS.syncRequests, "catalog"),
+    {
+      kind: "catalog",
+      scope: "sicar",
+      status: "PENDING",
+      requestedAt: now,
+      requestedBy: "web",
+      updatedAt: now,
+    },
+    { merge: true },
+  );
 }
 
 export async function listCloudScalePresets() {

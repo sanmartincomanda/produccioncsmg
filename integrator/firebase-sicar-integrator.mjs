@@ -12,6 +12,7 @@ const COLLECTIONS = {
   scalePresets: "scale_presets",
   sicarJobs: "sicar_jobs",
   productionOrders: "production_orders",
+  syncRequests: "sync_requests",
 };
 
 const CONFIG = {
@@ -116,8 +117,29 @@ async function writeRuntime(update) {
     );
 }
 
+async function readCatalogSyncRequest() {
+  const snapshot = await getDb().collection(COLLECTIONS.syncRequests).doc("catalog").get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+
+async function markCatalogSyncRequest(status, extra = {}) {
+  await getDb()
+    .collection(COLLECTIONS.syncRequests)
+    .doc("catalog")
+    .set(
+      {
+        kind: "catalog",
+        status,
+        updatedAt: nowIso(),
+        ...extra,
+      },
+      { merge: true },
+    );
+}
+
 async function syncCatalogItems() {
   const pool = getSicarPool();
+  const requestState = await readCatalogSyncRequest();
   const [rows] = await pool.query(`
     SELECT
       a.art_id AS artId,
@@ -187,6 +209,13 @@ async function syncCatalogItems() {
       syncedAt: nowIso(),
     },
   });
+
+  if (requestState?.status === "PENDING") {
+    await markCatalogSyncRequest("COMPLETED", {
+      completedAt: nowIso(),
+      rows: rows.length,
+    });
+  }
 
   log("Catálogo sincronizado", { rows: rows.length });
 }

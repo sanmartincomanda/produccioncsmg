@@ -1,8 +1,9 @@
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, Search, SlidersHorizontal } from "lucide-react";
 
+import { CatalogSyncPanel } from "@/components/catalog/catalog-sync-panel";
 import { listCloudCatalogPageData } from "@/lib/firebase/cloud-data";
 import type { SicarCatalogItem, SicarCatalogResult } from "@/lib/sicar/catalog";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
@@ -24,48 +25,36 @@ export function CatalogExplorer({ initialData }: CatalogExplorerProps) {
   const deferredSearch = useDeferredValue(search);
   const pageLimit = initialData.limit || 24;
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadCloudCatalog = useCallback(async () => {
+    startTransition(() => {
+      setLoading(true);
+      setError(null);
+    });
 
-    async function loadCloudCatalog() {
+    try {
+      const nextData = await listCloudCatalogPageData();
+
       startTransition(() => {
-        setLoading(true);
-        setError(null);
+        setAllRows(nextData.rows);
       });
-
-      try {
-        const nextData = await listCloudCatalogPageData();
-
-        if (!cancelled) {
-          startTransition(() => {
-            setAllRows(nextData.rows);
-          });
-        }
-      } catch (fetchError) {
-        if (!cancelled) {
-          startTransition(() => {
-            setError(
-              fetchError instanceof Error
-                ? fetchError.message
-                : "No fue posible consultar el catálogo en la nube.",
-            );
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          startTransition(() => {
-            setLoading(false);
-          });
-        }
-      }
+    } catch (fetchError) {
+      startTransition(() => {
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "No fue posible consultar el catalogo sincronizado.",
+        );
+      });
+    } finally {
+      startTransition(() => {
+        setLoading(false);
+      });
     }
-
-    void loadCloudCatalog();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    void loadCloudCatalog();
+  }, [loadCloudCatalog]);
 
   const filteredRows = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
@@ -112,13 +101,14 @@ export function CatalogExplorer({ initialData }: CatalogExplorerProps) {
 
   return (
     <div className="space-y-6">
+      <CatalogSyncPanel onSynced={loadCloudCatalog} />
+
       <div className="surface-card flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.32em] text-cyan-700">Busqueda viva</p>
-          <h2 className="font-display text-2xl text-slate-950">Catalogo conectado a SICAR</h2>
+          <h2 className="font-display text-2xl text-slate-950">Catalogo sincronizado con SICAR</h2>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            Esta vista lee `articulo` y `unidad` en tiempo real. Muestra clave, descripcion, unidad,
-            existencia, costo de compra y costo promedio.
+            Esta vista usa el catalogo guardado en Firebase por el integrador local.
           </p>
         </div>
 
@@ -127,7 +117,7 @@ export function CatalogExplorer({ initialData }: CatalogExplorerProps) {
             {formatNumber(data.total)} articulos encontrados
           </div>
           <div className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 font-medium text-cyan-800">
-            Catalogo en vivo
+            Catalogo SICAR
           </div>
         </div>
       </div>
