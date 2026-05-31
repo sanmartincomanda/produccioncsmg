@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -27,6 +28,7 @@ import type {
   ProductionOrderListItem,
   ProductionOrderRecord,
   ProductionRecipeTemplate,
+  ProductionSessionRecord,
   ProductionWorkflowStage,
   ScalePreset,
   SicarPostingPreview,
@@ -38,6 +40,7 @@ const COLLECTIONS = {
   integratorRuntime: "integrator_runtime",
   manualCostItems: "manual_cost_items",
   productionOrders: "production_orders",
+  productionSessions: "production_sessions",
   recipes: "recipes",
   scalePresets: "scale_presets",
   syncRequests: "sync_requests",
@@ -300,6 +303,19 @@ function mapOrderDoc(snapshot: QueryDocumentSnapshot): ProductionOrderRecord {
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
     completedAt: data.completedAt ? toIso(data.completedAt) : null,
+  };
+}
+
+function mapSessionDoc(snapshot: QueryDocumentSnapshot): ProductionSessionRecord {
+  const data = snapshot.data() as Record<string, unknown>;
+
+  return {
+    sessionId: String(data.sessionId ?? snapshot.id),
+    label: String(data.label ?? "Producción en espera"),
+    draft: normalizeProductionDraft(data.draft),
+    stationState: data.stationState ?? null,
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
   };
 }
 
@@ -638,6 +654,46 @@ export async function saveCloudRecipe(payload: CloudRecipeSavePayload) {
     recipeCode: code,
     recipeName: payload.name,
   };
+}
+
+export async function listCloudProductionSessions() {
+  const db = getDb();
+  const snapshot = await getDocs(
+    query(collection(db, COLLECTIONS.productionSessions), orderBy("updatedAt", "desc"), limit(100)),
+  );
+  return snapshot.docs.map(mapSessionDoc);
+}
+
+export async function saveCloudProductionSession(payload: {
+  sessionId?: string | null;
+  label: string;
+  draft: unknown;
+  stationState: unknown;
+}) {
+  const db = getDb();
+  const sessionId = payload.sessionId?.trim() || `hold-${Date.now()}`;
+  const sessionRef = doc(db, COLLECTIONS.productionSessions, sessionId);
+  const previous = await getDoc(sessionRef);
+  const now = nowIso();
+
+  await setDoc(
+    sessionRef,
+    {
+      sessionId,
+      label: payload.label.trim() || "Producción en espera",
+      draft: normalizeProductionDraft(payload.draft),
+      stationState: payload.stationState ?? null,
+      createdAt: previous.exists() ? previous.data()?.createdAt ?? now : now,
+      updatedAt: now,
+    },
+    { merge: true },
+  );
+
+  return { sessionId };
+}
+
+export async function deleteCloudProductionSession(sessionId: string) {
+  await deleteDoc(doc(getDb(), COLLECTIONS.productionSessions, sessionId));
 }
 
 export async function createCloudProductionOrder(draftInput: unknown) {

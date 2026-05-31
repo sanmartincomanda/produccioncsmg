@@ -7,7 +7,9 @@ import {
   Boxes,
   CalendarDays,
   CopyPlus,
+  FolderOpen,
   ListPlus,
+  PauseCircle,
   Printer,
   Save,
   Scale,
@@ -34,10 +36,13 @@ import {
 } from "@/lib/catalog/browser-preferences";
 import {
   createCloudProductionOrder,
+  deleteCloudProductionSession,
   listCloudCatalogOptions,
   listCloudManualCostItems,
+  listCloudProductionSessions,
   listCloudRecipes,
   listCloudScalePresets,
+  saveCloudProductionSession,
 } from "@/lib/firebase/cloud-data";
 import {
   createDraftFromRecipeTemplate,
@@ -54,6 +59,7 @@ import type {
   ProductionDraft,
   ProductionDraftInput,
   ProductionRecipeTemplate,
+  ProductionSessionRecord,
   ScalePreset,
 } from "@/types/production";
 
@@ -83,6 +89,13 @@ type CatalogDrawerState =
   | { kind: "replace-output"; outputId: string }
   | null;
 
+type OutputWeightPromptState = {
+  article: CatalogOption;
+  outputId: string | null;
+  initialWeight: string;
+  mode: "capture" | "stage";
+} | null;
+
 type ProductionWorkbenchProps = {
   catalogOptions: CatalogOption[];
   manualCostItems: ManualCostItem[];
@@ -106,6 +119,46 @@ function createEmptyTouchStationState(scalePresets: ScalePreset[]): TouchStation
     selectedScaleId: scalePresets[0]?.scaleId ?? null,
     autoPrint: true,
     recentCaptures: [],
+  };
+}
+
+function normalizeTouchStationState(
+  value: unknown,
+  scalePresets: ScalePreset[],
+  fallback?: Partial<TouchStationState>,
+): TouchStationState {
+  const base = {
+    ...createEmptyTouchStationState(scalePresets),
+    ...(fallback ?? {}),
+  };
+
+  if (!value || typeof value !== "object") {
+    return base;
+  }
+
+  const candidate = value as Partial<TouchStationState>;
+
+  return {
+    ...base,
+    activeOutputId: typeof candidate.activeOutputId === "string" ? candidate.activeOutputId : base.activeOutputId,
+    captureWeight: typeof candidate.captureWeight === "string" ? candidate.captureWeight : base.captureWeight,
+    productionDate:
+      typeof candidate.productionDate === "string" ? candidate.productionDate : base.productionDate,
+    selectedScaleId:
+      typeof candidate.selectedScaleId === "number" ? candidate.selectedScaleId : base.selectedScaleId,
+    autoPrint: typeof candidate.autoPrint === "boolean" ? candidate.autoPrint : base.autoPrint,
+    recentCaptures: Array.isArray(candidate.recentCaptures)
+      ? candidate.recentCaptures.filter(
+          (item): item is CaptureRecord =>
+            Boolean(
+              item &&
+                typeof item === "object" &&
+                typeof (item as CaptureRecord).id === "string" &&
+                typeof (item as CaptureRecord).outputId === "string" &&
+                typeof (item as CaptureRecord).weight === "string",
+            ),
+        )
+      : base.recentCaptures,
   };
 }
 
@@ -140,7 +193,7 @@ function appendKey(currentValue: string, key: string) {
     return "";
   }
 
-  if (key === "⌫") {
+  if (key === "DEL") {
     return currentValue.slice(0, -1);
   }
 
@@ -177,10 +230,15 @@ export function ProductionWorkbench({
   const [liveScalePresets, setLiveScalePresets] = useState<ScalePreset[]>(scalePresets);
   const [station, setStation] = useState<TouchStationState>(() => createEmptyTouchStationState(scalePresets));
   const [isSaving, setIsSaving] = useState(false);
+  const [isHolding, setIsHolding] = useState(false);
   const [catalogDrawer, setCatalogDrawer] = useState<CatalogDrawerState>(null);
   const [catalogQuery, setCatalogQuery] = useState("");
+  const [outputWeightPrompt, setOutputWeightPrompt] = useState<OutputWeightPromptState>(null);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
   const [isInputsModalOpen, setIsInputsModalOpen] = useState(false);
+  const [isSessionsModalOpen, setIsSessionsModalOpen] = useState(false);
+  const [sessionRecords, setSessionRecords] = useState<ProductionSessionRecord[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [saveFeedback, setSaveFeedback] = useState<{
     tone: "neutral" | "success" | "error";
     message: string;
@@ -191,17 +249,19 @@ export function ProductionWorkbench({
 
   const refreshCloudData = useCallback(async () => {
     try {
-      const [nextCatalog, nextManualCosts, nextRecipes, nextScalePresets] = await Promise.all([
+      const [nextCatalog, nextManualCosts, nextRecipes, nextScalePresets, nextSessions] = await Promise.all([
         listCloudCatalogOptions(),
         listCloudManualCostItems(),
         listCloudRecipes(),
         listCloudScalePresets(),
+        listCloudProductionSessions(),
       ]);
 
       setLiveCatalogOptions(nextCatalog);
       setLiveManualCostItems(nextManualCosts);
       setLiveRecipeTemplates(nextRecipes);
       setLiveScalePresets(nextScalePresets);
+      setSessionRecords(nextSessions);
     } catch {
       // If Firebase is not available we keep the initial payload from the server.
     }
@@ -239,33 +299,9 @@ export function ProductionWorkbench({
       try {
         const parsedStation = JSON.parse(rawStation) as Partial<TouchStationState>;
         startTransition(() => {
-          setStation((current) => ({
-            ...current,
-            activeOutputId:
-              typeof parsedStation.activeOutputId === "string" ? parsedStation.activeOutputId : current.activeOutputId,
-            captureWeight:
-              typeof parsedStation.captureWeight === "string" ? parsedStation.captureWeight : current.captureWeight,
-            productionDate:
-              typeof parsedStation.productionDate === "string"
-                ? parsedStation.productionDate
-                : current.productionDate,
-            selectedScaleId:
-              typeof parsedStation.selectedScaleId === "number"
-                ? parsedStation.selectedScaleId
-                : current.selectedScaleId,
-            autoPrint: typeof parsedStation.autoPrint === "boolean" ? parsedStation.autoPrint : current.autoPrint,
-            recentCaptures: Array.isArray(parsedStation.recentCaptures)
-              ? parsedStation.recentCaptures.filter(
-                  (item): item is CaptureRecord =>
-                    Boolean(
-                      item &&
-                        typeof item === "object" &&
-                        typeof (item as CaptureRecord).id === "string" &&
-                        typeof (item as CaptureRecord).outputId === "string",
-                    ),
-                )
-              : current.recentCaptures,
-          }));
+          setStation((current) =>
+            normalizeTouchStationState(parsedStation, availableScalePresets, current),
+          );
         });
       } catch {
         window.localStorage.removeItem(TOUCH_STATION_STORAGE_KEY);
@@ -330,11 +366,21 @@ export function ProductionWorkbench({
   const activeOutputPieces = activeOutput ? piecesByOutput[activeOutput.id] ?? 0 : 0;
   const selectedOutputCount = selectedOutputs.length;
 
+  function buildSessionLabel() {
+    const sourceLabel = draft.sourceProduct
+      ? `${draft.sourceProduct.clave} - ${draft.sourceProduct.descripcion}`
+      : "Produccion en espera";
+
+    return `${sourceLabel} - ${station.productionDate}`;
+  }
+
   function resetAll() {
     const nextDraft = createEmptyProductionDraft();
     const nextStation = createEmptyTouchStationState(availableScalePresets);
     setDraft(nextDraft);
     setStation(nextStation);
+    setActiveSessionId(null);
+    setOutputWeightPrompt(null);
     window.localStorage.setItem(PRODUCTION_DRAFT_STORAGE_KEY, JSON.stringify(nextDraft));
     window.localStorage.setItem(TOUCH_STATION_STORAGE_KEY, JSON.stringify(nextStation));
   }
@@ -382,50 +428,189 @@ export function ProductionWorkbench({
       const emptyOutput = draft.outputs.find((output) => !output.article);
 
       if (existingOutput) {
-        setStation((current) => ({
-          ...current,
-          activeOutputId: existingOutput.id,
-        }));
+        setOutputWeightPrompt({
+          article,
+          outputId: existingOutput.id,
+          initialWeight: station.captureWeight,
+          mode: "capture",
+        });
       } else if (emptyOutput) {
-        setDraft((current) => ({
-          ...current,
-          outputs: current.outputs.map((output) =>
-            output.id === emptyOutput.id ? { ...output, article } : output,
-          ),
-        }));
-        setStation((current) => ({
-          ...current,
-          activeOutputId: emptyOutput.id,
-        }));
+        setOutputWeightPrompt({
+          article,
+          outputId: emptyOutput.id,
+          initialWeight: station.captureWeight,
+          mode: "capture",
+        });
       } else {
-        const nextOutput = createDraftOutput();
-        nextOutput.article = article;
-
-        setDraft((current) => ({
-          ...current,
-          outputs: [...current.outputs, nextOutput],
-        }));
-        setStation((current) => ({
-          ...current,
-          activeOutputId: nextOutput.id,
-        }));
+        setOutputWeightPrompt({
+          article,
+          outputId: null,
+          initialWeight: station.captureWeight,
+          mode: "capture",
+        });
       }
     }
 
     if (catalogDrawer.kind === "replace-output") {
-      setDraft((current) => ({
-        ...current,
-        outputs: current.outputs.map((output) =>
-          output.id === catalogDrawer.outputId ? { ...output, article } : output,
-        ),
-      }));
-      setStation((current) => ({
-        ...current,
-        activeOutputId: catalogDrawer.outputId,
-      }));
+      setOutputWeightPrompt({
+        article,
+        outputId: catalogDrawer.outputId,
+        initialWeight: station.captureWeight,
+        mode: "stage",
+      });
     }
 
     setCatalogDrawer(null);
+  }
+
+  function confirmOutputWeight(value: string) {
+    if (!outputWeightPrompt) {
+      return;
+    }
+
+    const weight = parseDecimal(value);
+
+    if (weight <= 0) {
+      setSaveFeedback({
+        tone: "error",
+        message: "Ingresa un peso valido.",
+      });
+      return;
+    }
+
+    const prompt = outputWeightPrompt;
+    const outputId = prompt.outputId ?? crypto.randomUUID();
+    const formattedWeight = formatEditableWeight(weight);
+
+    setDraft((current) => {
+      const outputExists = current.outputs.some((output) => output.id === outputId);
+      const nextOutputs = outputExists
+        ? current.outputs.map((output) =>
+            output.id === outputId
+              ? {
+                  ...output,
+                  article: prompt.article,
+                  weight:
+                    prompt.mode === "capture"
+                      ? formatEditableWeight(parseDecimal(output.weight) + weight)
+                      : output.weight,
+                }
+              : output,
+          )
+        : [
+            ...current.outputs,
+            {
+              id: outputId,
+              article: prompt.article,
+              weight: prompt.mode === "capture" ? formattedWeight : "",
+              percentage: "",
+            },
+          ];
+
+      return {
+        ...current,
+        outputs: nextOutputs,
+      };
+    });
+
+    setStation((current) => ({
+      ...current,
+      activeOutputId: outputId,
+      captureWeight: prompt.mode === "capture" ? "" : sanitizeWeightInput(value),
+      recentCaptures:
+        prompt.mode === "capture"
+          ? [
+              {
+                id: crypto.randomUUID(),
+                outputId,
+                articleCode: prompt.article.clave,
+                articleName: prompt.article.descripcion,
+                weight: formattedWeight,
+                capturedAt: new Date().toISOString(),
+              },
+              ...current.recentCaptures,
+            ].slice(0, 24)
+          : current.recentCaptures,
+    }));
+
+    setOutputWeightPrompt(null);
+    setSaveFeedback({
+      tone: "success",
+      message:
+        prompt.mode === "capture"
+          ? `${prompt.article.descripcion} listo y capturado.`
+          : `${prompt.article.descripcion} listo para capturar.`,
+    });
+  }
+
+  async function handleSaveOnHold() {
+    if (!draft.sourceProduct && !draft.outputs.some((output) => output.article)) {
+      setSaveFeedback({
+        tone: "error",
+        message: "No hay produccion para poner en espera.",
+      });
+      return;
+    }
+
+    setIsHolding(true);
+    setSaveFeedback({
+      tone: "neutral",
+      message: "Guardando en espera...",
+    });
+
+    try {
+      const result = await saveCloudProductionSession({
+        sessionId: activeSessionId,
+        label: buildSessionLabel(),
+        draft,
+        stationState: {
+          ...station,
+          activeOutputId,
+          recentCaptures,
+        },
+      });
+
+      await refreshCloudData();
+      resetAll();
+      setSaveFeedback({
+        tone: "success",
+        message: `Produccion en espera ${result.sessionId}.`,
+      });
+    } catch (error) {
+      setSaveFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "No se pudo guardar en espera.",
+      });
+    } finally {
+      setIsHolding(false);
+    }
+  }
+
+  function handleOpenSession(record: ProductionSessionRecord) {
+    setDraft(normalizeProductionDraft(record.draft));
+    setStation((current) => normalizeTouchStationState(record.stationState, availableScalePresets, current));
+    setActiveSessionId(record.sessionId);
+    setIsSessionsModalOpen(false);
+    setSaveFeedback({
+      tone: "success",
+      message: `${record.label} abierta.`,
+    });
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    try {
+      await deleteCloudProductionSession(sessionId);
+      await refreshCloudData();
+
+      if (activeSessionId === sessionId) {
+        resetAll();
+      }
+    } catch (error) {
+      setSaveFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "No se pudo eliminar la espera.",
+      });
+    }
   }
 
   function setCaptureWeight(value: string) {
@@ -607,6 +792,11 @@ export function ProductionWorkbench({
     try {
       const result = await createCloudProductionOrder(payloadDraft);
 
+      if (activeSessionId) {
+        await deleteCloudProductionSession(activeSessionId);
+        await refreshCloudData();
+      }
+
       resetAll();
       setSaveFeedback({
         tone: "success",
@@ -691,6 +881,20 @@ export function ProductionWorkbench({
                   detail={`${draft.inputs.length} cargados`}
                   onClick={() => setIsInputsModalOpen(true)}
                 />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <SmallActionButton onClick={handleSaveOnHold} disabled={isHolding}>
+                  <PauseCircle className="size-4" />
+                  {isHolding ? "Guardando..." : "En espera"}
+                </SmallActionButton>
+                <SmallActionButton onClick={() => setIsSessionsModalOpen(true)}>
+                  <FolderOpen className="size-4" />
+                  Abrir espera
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">
+                    {sessionRecords.length}
+                  </span>
+                </SmallActionButton>
               </div>
             </div>
           </div>
@@ -856,7 +1060,7 @@ export function ProductionWorkbench({
               </div>
 
               <div className="grid grid-cols-4 gap-2">
-                {["7", "8", "9", "C", "4", "5", "6", "⌫", "1", "2", "3", ".", "0", "00"].map((key) => {
+                {["7", "8", "9", "C", "4", "5", "6", "DEL", "1", "2", "3", ".", "0", "00"].map((key) => {
                   const isWideAction = key === "0";
 
                   return (
@@ -963,6 +1167,18 @@ export function ProductionWorkbench({
       </AnimatePresence>
 
       <AnimatePresence>
+        {outputWeightPrompt ? (
+          <WeightPromptModal
+            article={outputWeightPrompt.article}
+            initialWeight={outputWeightPrompt.initialWeight}
+            mode={outputWeightPrompt.mode}
+            onClose={() => setOutputWeightPrompt(null)}
+            onConfirm={confirmOutputWeight}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isRecipeModalOpen ? (
           <RecipeModal
             recipes={availableRecipeTemplates}
@@ -985,6 +1201,18 @@ export function ProductionWorkbench({
                 inputs: nextInputs,
               }))
             }
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isSessionsModalOpen ? (
+          <ProductionSessionsModal
+            sessions={sessionRecords}
+            activeSessionId={activeSessionId}
+            onClose={() => setIsSessionsModalOpen(false)}
+            onOpen={handleOpenSession}
+            onDelete={handleDeleteSession}
           />
         ) : null}
       </AnimatePresence>
@@ -1045,15 +1273,18 @@ function ToolbarButton({
 function SmallActionButton({
   children,
   onClick,
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-[16px] border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300"
+      disabled={disabled}
+      className="inline-flex items-center gap-2 rounded-[16px] border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
     >
       {children}
     </button>
@@ -1273,6 +1504,145 @@ function FilterChip({
     >
       {children}
     </button>
+  );
+}
+
+function WeightPromptModal({
+  article,
+  initialWeight,
+  mode,
+  onClose,
+  onConfirm,
+}: {
+  article: CatalogOption;
+  initialWeight: string;
+  mode: "capture" | "stage";
+  onClose: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const [weight, setWeight] = useState(() => sanitizeWeightInput(initialWeight));
+
+  return (
+    <ModalShell title={mode === "capture" ? "Peso a producir" : "Peso para capturar"} onClose={onClose}>
+      <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="border-b border-slate-200 px-6 py-6 lg:border-b-0 lg:border-r">
+          <p className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Producto</p>
+          <p className="mt-3 font-display text-3xl leading-tight text-slate-950">{article.descripcion}</p>
+          <p className="mt-2 text-sm text-slate-500">{article.clave}</p>
+
+          <div className="mt-6 rounded-[24px] border-2 border-orange-300 bg-orange-50 px-6 py-6 text-center">
+            <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Peso</p>
+            <div className="mt-3 flex items-end justify-center gap-2">
+              <span className="font-display text-[3.4rem] leading-none text-slate-950">
+                {weight || "0.00"}
+              </span>
+              <span className="pb-2 text-xl text-slate-500">lb</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col px-6 py-6">
+          <div className="grid grid-cols-4 gap-2">
+            {["7", "8", "9", "C", "4", "5", "6", "DEL", "1", "2", "3", ".", "0", "00"].map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setWeight((current) => appendKey(current, key))}
+                className={cn(
+                  "inline-flex h-14 items-center justify-center rounded-[18px] border border-slate-200 bg-white text-base font-semibold text-slate-950 transition hover:border-slate-300",
+                  key === "0" ? "col-span-2" : "",
+                )}
+              >
+                {key}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            <button
+              type="button"
+              onClick={() => onConfirm(weight)}
+              className="inline-flex h-14 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,#0f766e,#14b8a6)] text-base font-semibold text-white shadow-[0_20px_36px_-22px_rgba(20,184,166,0.6)]"
+            >
+              Continuar
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-12 items-center justify-center rounded-[18px] border border-slate-200 bg-white text-sm font-semibold text-slate-700"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ProductionSessionsModal({
+  sessions,
+  activeSessionId,
+  onClose,
+  onOpen,
+  onDelete,
+}: {
+  sessions: ProductionSessionRecord[];
+  activeSessionId: string | null;
+  onClose: () => void;
+  onOpen: (record: ProductionSessionRecord) => void;
+  onDelete: (sessionId: string) => void | Promise<void>;
+}) {
+  return (
+    <ModalShell title="Producciones en espera" onClose={onClose}>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="space-y-3">
+          {sessions.map((session) => (
+            <div
+              key={session.sessionId}
+              className={cn(
+                "rounded-[22px] border p-4 transition",
+                activeSessionId === session.sessionId
+                  ? "border-orange-300 bg-orange-50"
+                  : "border-slate-200 bg-white",
+              )}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-slate-950">{session.label}</p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    {new Date(session.updatedAt).toLocaleString("es-NI")}
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(session)}
+                    className="inline-flex h-11 items-center justify-center rounded-[16px] border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-cyan-900"
+                  >
+                    Abrir
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(session.sessionId)}
+                    className="inline-flex h-11 items-center justify-center rounded-[16px] border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {sessions.length === 0 ? (
+            <div className="rounded-[22px] border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
+              Sin producciones en espera
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 

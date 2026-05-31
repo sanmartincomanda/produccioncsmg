@@ -192,3 +192,12 @@ export type SicarPostingPreview = {
     allocatedCost: number;
   }>;
 };
+
+export type ProductionSessionRecord = {
+  sessionId: string;
+  label: string;
+  draft: ProductionDraft;
+  stationState: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
