@@ -363,7 +363,7 @@ export function CostingWorkbench({
             </div>
 
             <div className="rounded-2xl border border-[#dcc9a2] bg-white/90 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.35em] text-[#7b684f]">Peso capturado</p>
+              <p className="text-[11px] uppercase tracking-[0.35em] text-[#7b684f]">Peso producido</p>
               <p className="mt-2 text-sm font-medium text-[#2d2118]">
                 {selectedOrderMeta ? `${formatDecimal(selectedOrderMeta.producedWeight)} lb` : "0.00 lb"}
               </p>

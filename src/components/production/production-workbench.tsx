@@ -93,7 +93,6 @@ type OutputWeightPromptState = {
   article: CatalogOption;
   outputId: string | null;
   initialWeight: string;
-  mode: "capture" | "stage";
 } | null;
 
 type ProductionWorkbenchProps = {
@@ -412,14 +411,10 @@ export function ProductionWorkbench({
     }
 
     if (catalogDrawer.kind === "source") {
-      setDraft((current) => ({
-        ...current,
-        sourceProduct: article,
-        sourceUnitCost: String(article.preCompraProm),
-      }));
-      setSaveFeedback({
-        tone: "neutral",
-        message: `${article.descripcion} listo.`,
+      setOutputWeightPrompt({
+        article,
+        outputId: null,
+        initialWeight: draft.sourceWeight,
       });
     }
 
@@ -428,35 +423,60 @@ export function ProductionWorkbench({
       const emptyOutput = draft.outputs.find((output) => !output.article);
 
       if (existingOutput) {
-        setOutputWeightPrompt({
-          article,
-          outputId: existingOutput.id,
-          initialWeight: station.captureWeight,
-          mode: "capture",
+        setStation((current) => ({
+          ...current,
+          activeOutputId: existingOutput.id,
+        }));
+        setSaveFeedback({
+          tone: "success",
+          message: `${article.descripcion} lista para capturar.`,
         });
       } else if (emptyOutput) {
-        setOutputWeightPrompt({
-          article,
-          outputId: emptyOutput.id,
-          initialWeight: station.captureWeight,
-          mode: "capture",
+        setDraft((current) => ({
+          ...current,
+          outputs: current.outputs.map((output) =>
+            output.id === emptyOutput.id ? { ...output, article } : output,
+          ),
+        }));
+        setStation((current) => ({
+          ...current,
+          activeOutputId: emptyOutput.id,
+        }));
+        setSaveFeedback({
+          tone: "success",
+          message: `${article.descripcion} lista para capturar.`,
         });
       } else {
-        setOutputWeightPrompt({
-          article,
-          outputId: null,
-          initialWeight: station.captureWeight,
-          mode: "capture",
+        const newOutput = createDraftOutput();
+        setDraft((current) => ({
+          ...current,
+          outputs: [...current.outputs, { ...newOutput, article }],
+        }));
+        setStation((current) => ({
+          ...current,
+          activeOutputId: newOutput.id,
+        }));
+        setSaveFeedback({
+          tone: "success",
+          message: `${article.descripcion} lista para capturar.`,
         });
       }
     }
 
     if (catalogDrawer.kind === "replace-output") {
-      setOutputWeightPrompt({
-        article,
-        outputId: catalogDrawer.outputId,
-        initialWeight: station.captureWeight,
-        mode: "stage",
+      setDraft((current) => ({
+        ...current,
+        outputs: current.outputs.map((output) =>
+          output.id === catalogDrawer.outputId ? { ...output, article } : output,
+        ),
+      }));
+      setStation((current) => ({
+        ...current,
+        activeOutputId: catalogDrawer.outputId,
+      }));
+      setSaveFeedback({
+        tone: "success",
+        message: `${article.descripcion} lista para capturar.`,
       });
     }
 
@@ -479,67 +499,19 @@ export function ProductionWorkbench({
     }
 
     const prompt = outputWeightPrompt;
-    const outputId = prompt.outputId ?? crypto.randomUUID();
     const formattedWeight = formatEditableWeight(weight);
 
-    setDraft((current) => {
-      const outputExists = current.outputs.some((output) => output.id === outputId);
-      const nextOutputs = outputExists
-        ? current.outputs.map((output) =>
-            output.id === outputId
-              ? {
-                  ...output,
-                  article: prompt.article,
-                  weight:
-                    prompt.mode === "capture"
-                      ? formatEditableWeight(parseDecimal(output.weight) + weight)
-                      : output.weight,
-                }
-              : output,
-          )
-        : [
-            ...current.outputs,
-            {
-              id: outputId,
-              article: prompt.article,
-              weight: prompt.mode === "capture" ? formattedWeight : "",
-              percentage: "",
-            },
-          ];
-
-      return {
-        ...current,
-        outputs: nextOutputs,
-      };
-    });
-
-    setStation((current) => ({
+    setDraft((current) => ({
       ...current,
-      activeOutputId: outputId,
-      captureWeight: prompt.mode === "capture" ? "" : sanitizeWeightInput(value),
-      recentCaptures:
-        prompt.mode === "capture"
-          ? [
-              {
-                id: crypto.randomUUID(),
-                outputId,
-                articleCode: prompt.article.clave,
-                articleName: prompt.article.descripcion,
-                weight: formattedWeight,
-                capturedAt: new Date().toISOString(),
-              },
-              ...current.recentCaptures,
-            ].slice(0, 24)
-          : current.recentCaptures,
+      sourceProduct: prompt.article,
+      sourceWeight: formattedWeight,
+      sourceUnitCost: String(prompt.article.preCompraProm),
     }));
 
     setOutputWeightPrompt(null);
     setSaveFeedback({
       tone: "success",
-      message:
-        prompt.mode === "capture"
-          ? `${prompt.article.descripcion} listo y capturado.`
-          : `${prompt.article.descripcion} listo para capturar.`,
+      message: `${prompt.article.descripcion} lista para trabajar.`,
     });
   }
 
@@ -768,6 +740,14 @@ export function ProductionWorkbench({
       return;
     }
 
+    if (parseDecimal(draft.sourceWeight) <= 0) {
+      setSaveFeedback({
+        tone: "error",
+        message: "Pesa el producto que sale antes de grabar.",
+      });
+      return;
+    }
+
     if (!draft.outputs.some((output) => output.article && parseDecimal(output.weight) > 0)) {
       setSaveFeedback({
         tone: "error",
@@ -778,7 +758,7 @@ export function ProductionWorkbench({
 
     const payloadDraft: ProductionDraft = {
       ...draft,
-      sourceWeight: formatEditableWeight(totalProducedWeight),
+      sourceWeight: formatEditableWeight(parseDecimal(draft.sourceWeight)),
       sourceUnitCost: draft.sourceProduct ? String(draft.sourceProduct.preCompraProm) : draft.sourceUnitCost,
       outputs: draft.outputs.filter((output) => output.article && parseDecimal(output.weight) > 0),
     };
@@ -833,6 +813,9 @@ export function ProductionWorkbench({
                   {draft.sourceProduct
                     ? `${draft.sourceProduct.clave} - ${draft.sourceProduct.descripcion}`
                     : "Seleccionar producto"}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {parseDecimal(draft.sourceWeight) > 0 ? `${formatWeight(draft.sourceWeight)}` : "Peso pendiente"}
                 </p>
               </button>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[150px_170px_1fr_1fr]">
@@ -1171,7 +1154,6 @@ export function ProductionWorkbench({
           <WeightPromptModal
             article={outputWeightPrompt.article}
             initialWeight={outputWeightPrompt.initialWeight}
-            mode={outputWeightPrompt.mode}
             onClose={() => setOutputWeightPrompt(null)}
             onConfirm={confirmOutputWeight}
           />
@@ -1510,23 +1492,21 @@ function FilterChip({
 function WeightPromptModal({
   article,
   initialWeight,
-  mode,
   onClose,
   onConfirm,
 }: {
   article: CatalogOption;
   initialWeight: string;
-  mode: "capture" | "stage";
   onClose: () => void;
   onConfirm: (value: string) => void;
 }) {
   const [weight, setWeight] = useState(() => sanitizeWeightInput(initialWeight));
 
   return (
-    <ModalShell title={mode === "capture" ? "Peso a producir" : "Peso para capturar"} onClose={onClose}>
+    <ModalShell title="Peso del producto que sale" onClose={onClose}>
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="border-b border-slate-200 px-6 py-6 lg:border-b-0 lg:border-r">
-          <p className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Producto</p>
+          <p className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Sale</p>
           <p className="mt-3 font-display text-3xl leading-tight text-slate-950">{article.descripcion}</p>
           <p className="mt-2 text-sm text-slate-500">{article.clave}</p>
 
