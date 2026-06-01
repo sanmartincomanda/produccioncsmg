@@ -483,6 +483,24 @@ export function ProductionWorkbench({
     setCatalogDrawer(null);
   }
 
+  function openOutputWeightEditor(outputId: string) {
+    const output = draft.outputs.find((item) => item.id === outputId);
+
+    if (!output?.article) {
+      setSaveFeedback({
+        tone: "error",
+        message: "Selecciona el producto antes de editar el peso.",
+      });
+      return;
+    }
+
+    setOutputWeightPrompt({
+      article: output.article,
+      outputId,
+      initialWeight: output.weight,
+    });
+  }
+
   function confirmOutputWeight(value: string) {
     if (!outputWeightPrompt) {
       return;
@@ -500,6 +518,27 @@ export function ProductionWorkbench({
 
     const prompt = outputWeightPrompt;
     const formattedWeight = formatEditableWeight(weight);
+
+    if (prompt.outputId) {
+      setDraft((current) => ({
+        ...current,
+        outputs: current.outputs.map((output) =>
+          output.id === prompt.outputId ? { ...output, weight: formattedWeight } : output,
+        ),
+      }));
+
+      setStation((current) => ({
+        ...current,
+        activeOutputId: prompt.outputId,
+      }));
+
+      setSaveFeedback({
+        tone: "success",
+        message: `${prompt.article.descripcion} actualizada a ${formattedWeight} lb.`,
+      });
+      setOutputWeightPrompt(null);
+      return;
+    }
 
     setDraft((current) => ({
       ...current,
@@ -918,15 +957,25 @@ export function ProductionWorkbench({
                   const pieceCount = piecesByOutput[output.id] ?? 0;
 
                   return (
-                    <button
+                    <div
                       key={output.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() =>
                         setStation((current) => ({
                           ...current,
                           activeOutputId: output.id,
                         }))
                       }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setStation((current) => ({
+                            ...current,
+                            activeOutputId: output.id,
+                          }));
+                        }
+                      }}
                       className={cn(
                         "relative min-h-[206px] rounded-[24px] border p-4 text-left transition-all",
                         isSelected
@@ -966,10 +1015,25 @@ export function ProductionWorkbench({
                       <p className="mt-2 text-sm text-slate-500">{output.article?.clave}</p>
 
                       <div className="mt-4 grid grid-cols-2 gap-3">
-                        <CompactValueCard label="Peso" value={formatWeight(output.weight || 0)} />
+                        <CompactValueCard
+                          label="Peso"
+                          value={formatWeight(output.weight || 0)}
+                          onClick={() => openOutputWeightEditor(output.id)}
+                        />
                         <CompactValueCard label="Piezas" value={String(pieceCount)} />
                       </div>
-                    </button>
+
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openOutputWeightEditor(output.id);
+                        }}
+                        className="mt-3 inline-flex h-10 items-center justify-center rounded-[16px] border border-cyan-200 bg-cyan-50 px-4 text-sm font-semibold text-cyan-900"
+                      >
+                        Editar peso
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1273,9 +1337,33 @@ function SmallActionButton({
   );
 }
 
-function CompactValueCard({ label, value }: { label: string; value: string }) {
+function CompactValueCard({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  onClick?: () => void;
+}) {
+  const sharedClassName =
+    "rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-left transition";
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${sharedClassName} hover:border-cyan-200 hover:bg-cyan-50/40`}
+      >
+        <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400">{label}</p>
+        <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
+      </button>
+    );
+  }
+
   return (
-    <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-3">
+    <div className={sharedClassName}>
       <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400">{label}</p>
       <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
     </div>
