@@ -43,6 +43,7 @@ const COLLECTIONS = {
   productionSessions: "production_sessions",
   recipes: "recipes",
   scalePresets: "scale_presets",
+  sicarPostingRequests: "sicar_posting_requests",
   syncRequests: "sync_requests",
   systemMeta: "system_meta",
 } as const;
@@ -811,4 +812,54 @@ export async function listCloudSicarPostingPreviews(articleProfiles: ArticleProf
     .map(mapOrderDoc)
     .filter((record) => record.workflowStage !== "PRODUCED")
     .map((record) => toPostingPreview(record, articleProfiles));
+}
+
+export async function requestCloudSicarPosting(productionOrderIds: number[]) {
+  const ids = [...new Set(productionOrderIds.filter((value) => Number(value) > 0))];
+
+  if (ids.length === 0) {
+    throw new Error("Selecciona al menos una produccion.");
+  }
+
+  const db = getDb();
+  const now = nowIso();
+
+  await Promise.all(
+    ids.map(async (productionOrderId) => {
+      const orderRef = doc(db, COLLECTIONS.productionOrders, String(productionOrderId));
+      const orderSnapshot = await getDoc(orderRef);
+
+      if (!orderSnapshot.exists()) {
+        throw new Error(`Produccion ${productionOrderId} no encontrada.`);
+      }
+
+      const requestRef = doc(db, COLLECTIONS.sicarPostingRequests, String(productionOrderId));
+      const requestSnapshot = await getDoc(requestRef);
+      const requestData = requestSnapshot.data() as Record<string, unknown> | undefined;
+
+      await setDoc(
+        orderRef,
+        {
+          workflowStage: "READY_FOR_SICAR",
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+
+      await setDoc(
+        requestRef,
+        {
+          requestId: String(productionOrderId),
+          productionOrderId,
+          status: "PENDING",
+          requestedAt: now,
+          updatedAt: now,
+          createdAt: requestSnapshot.exists() ? requestData?.createdAt ?? now : now,
+        },
+        { merge: true },
+      );
+    }),
+  );
+
+  return { ok: true, count: ids.length };
 }

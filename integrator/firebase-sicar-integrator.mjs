@@ -11,6 +11,7 @@ const COLLECTIONS = {
   integratorRuntime: "integrator_runtime",
   scalePresets: "scale_presets",
   sicarJobs: "sicar_jobs",
+  sicarPostingRequests: "sicar_posting_requests",
   productionOrders: "production_orders",
   syncRequests: "sync_requests",
 };
@@ -307,20 +308,67 @@ function buildPostingJob(record) {
 
 async function syncPostingQueue() {
   const db = getDb();
-  const snapshot = await db.collection(COLLECTIONS.productionOrders).get();
-  const readyRecords = snapshot.docs
-    .map((doc) => doc.data())
-    .filter((record) => ["COSTED", "READY_FOR_SICAR"].includes(String(record.workflowStage ?? "")));
+  const snapshot = await db
+    .collection(COLLECTIONS.sicarPostingRequests)
+    .where("status", "==", "PENDING")
+    .get();
 
   let processed = 0;
 
-  for (const record of readyRecords) {
+  for (const requestDoc of snapshot.docs) {
+    const request = requestDoc.data();
+    const productionOrderId = Number(request.productionOrderId ?? 0);
+
+    if (!productionOrderId) {
+      await requestDoc.ref.set(
+        {
+          status: "ERROR",
+          updatedAt: nowIso(),
+          lastErrorMessage: "productionOrderId invalido.",
+        },
+        { merge: true },
+      );
+      continue;
+    }
+
+    const orderSnapshot = await db.collection(COLLECTIONS.productionOrders).doc(String(productionOrderId)).get();
+
+    if (!orderSnapshot.exists) {
+      await requestDoc.ref.set(
+        {
+          status: "ERROR",
+          updatedAt: nowIso(),
+          lastErrorMessage: `Produccion ${productionOrderId} no encontrada.`,
+        },
+        { merge: true },
+      );
+      continue;
+    }
+
+    const record = orderSnapshot.data();
     const job = buildPostingJob(record);
 
     await db
       .collection(COLLECTIONS.sicarJobs)
       .doc(String(job.productionOrderId))
-      .set(job, { merge: true });
+      .set(
+        {
+          ...job,
+          requestId: String(request.requestId ?? productionOrderId),
+          requestedAt: String(request.requestedAt ?? nowIso()),
+          updatedAt: nowIso(),
+        },
+        { merge: true },
+      );
+
+    await requestDoc.ref.set(
+      {
+        status: CONFIG.enableSicarWrites ? "PENDING_IMPLEMENTATION" : "SIMULATED",
+        processedAt: nowIso(),
+        updatedAt: nowIso(),
+      },
+      { merge: true },
+    );
 
     processed += 1;
   }

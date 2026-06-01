@@ -8,6 +8,7 @@ import { ArrowDownCircle, ArrowUpCircle, ShieldCheck } from "lucide-react";
 import {
   listCloudArticleProfiles,
   listCloudSicarPostingPreviews,
+  requestCloudSicarPosting,
 } from "@/lib/firebase/cloud-data";
 import type { SicarPostingPreview } from "@/types/production";
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@/lib/utils";
@@ -16,13 +17,24 @@ type SicarControlCenterProps = {
   previews: SicarPostingPreview[];
 };
 
+type FeedbackState = {
+  tone: "neutral" | "success" | "error";
+  message: string;
+};
+
 export function SicarControlCenter({ previews }: SicarControlCenterProps) {
   const [livePreviews, setLivePreviews] = useState<SicarPostingPreview[]>(previews);
   const [loading, setLoading] = useState(previews.length === 0);
   const [selectedId, setSelectedId] = useState<number | null>(previews[0]?.productionOrderId ?? null);
   const [detailId, setDetailId] = useState<number | null>(null);
-
-  const availablePreviews = livePreviews.length > 0 ? livePreviews : previews;
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    tone: "neutral",
+    message: "Doble clic para abrir detalle.",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +61,8 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
     };
   }, []);
 
+  const availablePreviews = livePreviews.length > 0 ? livePreviews : previews;
+
   const costedInProgress = useMemo(
     () =>
       availablePreviews.filter(
@@ -57,20 +71,84 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
     [availablePreviews],
   );
 
+  const filteredPreviews = useMemo(() => {
+    return costedInProgress.filter((preview) => {
+      const recordDate = String(preview.updatedAt ?? preview.createdAt ?? "").slice(0, 10);
+
+      if (fromDate && recordDate < fromDate) {
+        return false;
+      }
+
+      if (toDate && recordDate > toDate) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [costedInProgress, fromDate, toDate]);
+
   const effectiveSelectedId =
-    selectedId && costedInProgress.some((preview) => preview.productionOrderId === selectedId)
+    selectedId && filteredPreviews.some((preview) => preview.productionOrderId === selectedId)
       ? selectedId
-      : costedInProgress[0]?.productionOrderId ?? null;
+      : filteredPreviews[0]?.productionOrderId ?? null;
 
   const effectiveDetailId =
-    detailId && costedInProgress.some((preview) => preview.productionOrderId === detailId)
+    detailId && filteredPreviews.some((preview) => preview.productionOrderId === detailId)
       ? detailId
       : null;
 
   const detailPreview = useMemo(
-    () => costedInProgress.find((preview) => preview.productionOrderId === effectiveDetailId) ?? null,
-    [costedInProgress, effectiveDetailId],
+    () => filteredPreviews.find((preview) => preview.productionOrderId === effectiveDetailId) ?? null,
+    [filteredPreviews, effectiveDetailId],
   );
+
+  const allFilteredIds = useMemo(
+    () => filteredPreviews.map((preview) => preview.productionOrderId),
+    [filteredPreviews],
+  );
+
+  const allSelected =
+    allFilteredIds.length > 0 && allFilteredIds.every((productionOrderId) => selectedIds.includes(productionOrderId));
+
+  async function refreshPreviews() {
+    const articleProfiles = await listCloudArticleProfiles();
+    const nextPreviews = await listCloudSicarPostingPreviews(articleProfiles);
+    setLivePreviews(nextPreviews);
+  }
+
+  async function submitPosting(ids: number[]) {
+    if (ids.length === 0) {
+      setFeedback({
+        tone: "error",
+        message: "Selecciona al menos una producción.",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFeedback({
+      tone: "neutral",
+      message: "Enviando al integrador...",
+    });
+
+    try {
+      const result = await requestCloudSicarPosting(ids);
+      setSelectedIds((current) => current.filter((id) => !ids.includes(id)));
+      setDetailId(null);
+      await refreshPreviews();
+      setFeedback({
+        tone: "success",
+        message: `${result.count} producción(es) enviadas a SICAR.`,
+      });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "No se pudo enviar a SICAR.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   if (loading) {
     return <section className="module-card text-center text-sm text-slate-500">Cargando...</section>;
@@ -92,22 +170,65 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
         <h1 className="font-display text-3xl text-slate-950">Integracion SICAR</h1>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
         <section className="module-card min-h-[720px] overflow-hidden p-0">
           <div className="border-b border-slate-200 px-5 py-4">
             <p className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Lista</p>
             <div className="mt-2 flex items-center justify-between gap-3">
               <h2 className="font-display text-2xl text-slate-950">IN_PROGRESS · COSTED</h2>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                {String(costedInProgress.length).padStart(2, "0")}
+                {String(filteredPreviews.length).padStart(2, "0")}
               </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(event) => setFromDate(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none"
+              />
+              <input
+                type="date"
+                value={toDate}
+                onChange={(event) => setToDate(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none"
+              />
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => {
+                    setSelectedIds((current) =>
+                      allSelected
+                        ? current.filter((id) => !allFilteredIds.includes(id))
+                        : [...new Set([...current, ...allFilteredIds])],
+                    );
+                  }}
+                  className="size-4 rounded border-slate-300"
+                />
+                Seleccionar todos
+              </label>
+
+              <button
+                type="button"
+                onClick={() => void submitPosting(selectedIds)}
+                disabled={selectedIds.length === 0 || isSubmitting}
+                className="inline-flex h-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Subir a SICAR
+              </button>
             </div>
           </div>
 
           <div className="max-h-[640px] space-y-2 overflow-y-auto px-3 py-3">
-            {costedInProgress.map((preview) => {
+            {filteredPreviews.map((preview) => {
               const isSelected = preview.productionOrderId === effectiveSelectedId;
               const isOpened = preview.productionOrderId === effectiveDetailId;
+              const isChecked = selectedIds.includes(preview.productionOrderId);
 
               return (
                 <button
@@ -128,10 +249,27 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-display text-[1.7rem] leading-none text-slate-950">{preview.folio}</p>
-                      <p className="mt-2 line-clamp-2 text-sm text-slate-600">{preview.sourceProductLabel}</p>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          setSelectedIds((current) =>
+                            current.includes(preview.productionOrderId)
+                              ? current.filter((id) => id !== preview.productionOrderId)
+                              : [...current, preview.productionOrderId],
+                          );
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className="mt-1 size-4 rounded border-slate-300"
+                      />
+
+                      <div className="min-w-0">
+                        <p className="font-display text-[1.7rem] leading-none text-slate-950">{preview.folio}</p>
+                        <p className="mt-2 line-clamp-2 text-sm text-slate-600">{preview.sourceProductLabel}</p>
+                      </div>
                     </div>
+
                     <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-500">
                       {preview.outputCount}
                     </span>
@@ -154,6 +292,12 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
                 </button>
               );
             })}
+
+            {filteredPreviews.length === 0 ? (
+              <div className="rounded-[22px] border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
+                Sin producciones en ese rango.
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -176,13 +320,16 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
                   </Link>
                   <button
                     type="button"
-                    disabled
-                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 px-4 text-sm font-medium text-slate-400"
+                    onClick={() => void submitPosting([detailPreview.productionOrderId])}
+                    disabled={isSubmitting}
+                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Subir a SICAR
                   </button>
                 </div>
               </div>
+
+              <FeedbackBanner feedback={feedback} />
 
               <div className="grid gap-4 md:grid-cols-3">
                 <MetricCard
@@ -240,14 +387,40 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
             </div>
           ) : (
             <div className="flex h-full min-h-[640px] items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 text-center">
-              <div>
+              <div className="w-full max-w-xl space-y-4 px-6">
                 <h2 className="font-display text-3xl text-slate-950">Detalle</h2>
-                <p className="mt-2 text-sm text-slate-500">Doble clic en una producción para abrirla.</p>
+                <p className="text-sm text-slate-500">Doble clic en una producción para abrirla.</p>
+                <button
+                  type="button"
+                  onClick={() => void submitPosting(selectedIds)}
+                  disabled={selectedIds.length === 0 || isSubmitting}
+                  className="inline-flex h-12 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-5 text-sm font-medium text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Subir a SICAR
+                </button>
+                <FeedbackBanner feedback={feedback} />
               </div>
             </div>
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function FeedbackBanner({ feedback }: { feedback: FeedbackState }) {
+  return (
+    <div
+      className={cn(
+        "rounded-[18px] border px-4 py-3 text-sm",
+        feedback.tone === "error"
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : feedback.tone === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-slate-200 bg-slate-50 text-slate-600",
+      )}
+    >
+      {feedback.message}
     </div>
   );
 }
