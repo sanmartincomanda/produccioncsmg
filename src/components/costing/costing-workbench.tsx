@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Plus, Save, Trash2 } from "lucide-react";
 
@@ -57,6 +57,48 @@ function isClosedOutFromCosting(workflowStage: string | null | undefined) {
   return workflowStage === "POSTED_TO_SICAR" || workflowStage === "SICAR_EXCLUDED";
 }
 
+function toPositiveNumber(value: string | number | null | undefined) {
+  const numericValue = Number(value ?? 0);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : 0;
+}
+
+function formatVrnPercentage(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+}
+
+function getArticleVrnDefault(article: CatalogOption | null, profiles: ArticleProfileDefault[]) {
+  if (!article) {
+    return "";
+  }
+
+  const profile = profiles.find((item) => item.sicarArtId === article.artId);
+  const vrnPercentage = toPositiveNumber(profile?.vrnPercentage);
+  return vrnPercentage > 0 ? formatVrnPercentage(vrnPercentage) : "";
+}
+
+function applyVrnDefaultsToDraft(draft: ProductionDraft, profiles: ArticleProfileDefault[]) {
+  if (profiles.length === 0) {
+    return draft;
+  }
+
+  let hasChanges = false;
+  const outputs = draft.outputs.map((output) => {
+    if (toPositiveNumber(output.percentage) > 0) {
+      return output;
+    }
+
+    const defaultPercentage = getArticleVrnDefault(output.article, profiles);
+    if (!defaultPercentage) {
+      return output;
+    }
+
+    hasChanges = true;
+    return { ...output, percentage: defaultPercentage };
+  });
+
+  return hasChanges ? { ...draft, outputs } : draft;
+}
+
 export function CostingWorkbench({
   articleProfiles,
   catalogOptions,
@@ -91,6 +133,7 @@ export function CostingWorkbench({
     liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
   const availableOrders = liveOrders.length > 0 ? liveOrders : orders;
   const availableRecipes = liveRecipes.length > 0 ? liveRecipes : recipes;
+  const articleProfilesRef = useRef(availableArticleProfiles);
   const effectiveSelectedOrder =
     liveSelectedOrder && !isClosedOutFromCosting(liveSelectedOrder.workflowStage)
       ? liveSelectedOrder
@@ -98,6 +141,10 @@ export function CostingWorkbench({
         ? initialSelectedOrder
         : null;
   const selectedOrder = effectiveSelectedOrder;
+
+  useEffect(() => {
+    articleProfilesRef.current = availableArticleProfiles;
+  }, [availableArticleProfiles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,9 +199,20 @@ export function CostingWorkbench({
 
   useEffect(() => {
     startTransition(() => {
-      setDraft(effectiveSelectedOrder?.draft ?? createEmptyProductionDraft());
+      setDraft(
+        applyVrnDefaultsToDraft(
+          effectiveSelectedOrder?.draft ?? createEmptyProductionDraft(),
+          articleProfilesRef.current,
+        ),
+      );
     });
   }, [effectiveSelectedOrder]);
+
+  useEffect(() => {
+    startTransition(() => {
+      setDraft((current) => applyVrnDefaultsToDraft(current, availableArticleProfiles));
+    });
+  }, [availableArticleProfiles]);
 
   const totals = calculateProductionTotals(draft, availableArticleProfiles);
   const todayLabel = new Intl.DateTimeFormat("es-NI", {
@@ -174,10 +232,19 @@ export function CostingWorkbench({
 
   function updateOutputArticle(outputId: string, nextArtId: string) {
     const nextArticle = availableCatalogOptions.find((item) => item.artId === Number(nextArtId)) ?? null;
+    const nextDefaultPercentage = getArticleVrnDefault(nextArticle, availableArticleProfiles);
 
     setDraft((current) => ({
       ...current,
-      outputs: current.outputs.map((row) => (row.id === outputId ? { ...row, article: nextArticle } : row)),
+      outputs: current.outputs.map((row) =>
+        row.id === outputId
+          ? {
+              ...row,
+              article: nextArticle,
+              percentage: nextDefaultPercentage,
+            }
+          : row,
+      ),
     }));
   }
 
@@ -300,7 +367,7 @@ export function CostingWorkbench({
       return;
     }
 
-    setDraft(createDraftFromRecipeTemplate(recipe));
+    setDraft(applyVrnDefaultsToDraft(createDraftFromRecipeTemplate(recipe), availableArticleProfiles));
     setFeedback({
       tone: "success",
       message: `Receta cargada: ${recipe.name}. Ahora puedes ajustarla para esta producción.`,

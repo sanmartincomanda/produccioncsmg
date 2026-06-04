@@ -13,7 +13,8 @@ export function resolveOutputPercentage(
   draftPercentage: string,
   profileDefault: ArticleProfileDefault | undefined,
 ) {
-  return draftPercentage ? toNumber(draftPercentage) : Number(profileDefault?.vrnPercentage ?? 0);
+  const manualPercentage = toNumber(draftPercentage);
+  return manualPercentage > 0 ? manualPercentage : Number(profileDefault?.vrnPercentage ?? 0);
 }
 
 export function calculateProductionTotals(
