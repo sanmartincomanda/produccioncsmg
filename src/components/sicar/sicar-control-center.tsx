@@ -3,9 +3,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle, ShieldCheck } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, ShieldCheck, X } from "lucide-react";
 
 import {
+  excludeCloudProductionFromSicar,
   listCloudArticleProfiles,
   listCloudSicarPostingPreviews,
   requestCloudSicarPosting,
@@ -31,6 +32,9 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExcludeOpen, setIsExcludeOpen] = useState(false);
+  const [excludeReason, setExcludeReason] = useState("");
+  const [excludeIds, setExcludeIds] = useState<number[]>([]);
   const [feedback, setFeedback] = useState<FeedbackState>({
     tone: "neutral",
     message: "Doble clic para abrir detalle.",
@@ -150,6 +154,53 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
     }
   }
 
+  function openExclude(ids: number[]) {
+    if (ids.length === 0) {
+      setFeedback({
+        tone: "error",
+        message: "Selecciona al menos una produccion.",
+      });
+      return;
+    }
+
+    setExcludeIds(ids);
+    setExcludeReason("");
+    setIsExcludeOpen(true);
+  }
+
+  async function submitExclusion() {
+    if (excludeIds.length === 0) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFeedback({
+      tone: "neutral",
+      message: "Excluyendo de SICAR...",
+    });
+
+    try {
+      const result = await excludeCloudProductionFromSicar(excludeIds, excludeReason);
+      setSelectedIds((current) => current.filter((id) => !excludeIds.includes(id)));
+      setDetailId(null);
+      setIsExcludeOpen(false);
+      setExcludeIds([]);
+      setExcludeReason("");
+      await refreshPreviews();
+      setFeedback({
+        tone: "success",
+        message: `${result.count} produccion(es) excluidas de SICAR.`,
+      });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "No se pudo excluir de SICAR.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   if (loading) {
     return <section className="module-card text-center text-sm text-slate-500">Cargando...</section>;
   }
@@ -220,6 +271,14 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
                 className="inline-flex h-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Subir a SICAR
+              </button>
+              <button
+                type="button"
+                onClick={() => openExclude(selectedIds)}
+                disabled={selectedIds.length === 0 || isSubmitting}
+                className="inline-flex h-10 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Excluir de SICAR
               </button>
             </div>
           </div>
@@ -326,6 +385,14 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
                   >
                     Subir a SICAR
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => openExclude([detailPreview.productionOrderId])}
+                    disabled={isSubmitting}
+                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Excluir de SICAR
+                  </button>
                 </div>
               </div>
 
@@ -404,6 +471,25 @@ export function SicarControlCenter({ previews }: SicarControlCenterProps) {
           )}
         </section>
       </div>
+
+      {isExcludeOpen ? (
+        <ExcludeModal
+          reason={excludeReason}
+          count={excludeIds.length}
+          onClose={() => {
+            if (isSubmitting) {
+              return;
+            }
+
+            setIsExcludeOpen(false);
+            setExcludeIds([]);
+            setExcludeReason("");
+          }}
+          onReasonChange={setExcludeReason}
+          onConfirm={() => void submitExclusion()}
+          isSubmitting={isSubmitting}
+        />
+      ) : null}
     </div>
   );
 }
@@ -484,6 +570,74 @@ function DetailLine({
             <p className="mt-2 text-sm font-medium text-slate-900">{value.value}</p>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ExcludeModal({
+  count,
+  reason,
+  onClose,
+  onReasonChange,
+  onConfirm,
+  isSubmitting,
+}: {
+  count: number;
+  reason: string;
+  onClose: () => void;
+  onReasonChange: (value: string) => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/40 p-4 backdrop-blur-sm">
+      <div className="mx-auto flex h-auto max-w-xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_44px_110px_-58px_rgba(15,23,42,0.35)]">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <h3 className="font-display text-3xl text-slate-950">Excluir de SICAR</h3>
+            <p className="mt-2 text-sm text-slate-500">{count} produccion(es)</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex size-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-6 py-6">
+          <label className="space-y-2">
+            <span className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Motivo</span>
+            <textarea
+              value={reason}
+              onChange={(event) => onReasonChange(event.target.value)}
+              rows={4}
+              placeholder="Escribe la razon"
+              className="w-full rounded-[18px] border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-500"
+            />
+          </label>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={isSubmitting}
+              className="inline-flex h-12 flex-1 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? "Guardando..." : "Confirmar exclusion"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="inline-flex h-12 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

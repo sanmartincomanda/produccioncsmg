@@ -294,6 +294,14 @@ function mapRecipeDoc(snapshot: QueryDocumentSnapshot): ProductionRecipeTemplate
 
 function mapOrderDoc(snapshot: QueryDocumentSnapshot): ProductionOrderRecord {
   const data = snapshot.data() as Record<string, unknown>;
+  const sicarPosting =
+    typeof data.sicarPosting === "object" && data.sicarPosting !== null
+      ? (data.sicarPosting as Record<string, unknown>)
+      : null;
+  const sicarExclusion =
+    typeof data.sicarExclusion === "object" && data.sicarExclusion !== null
+      ? (data.sicarExclusion as Record<string, unknown>)
+      : null;
 
   return {
     productionOrderId: toNumber(data.productionOrderId),
@@ -304,6 +312,21 @@ function mapOrderDoc(snapshot: QueryDocumentSnapshot): ProductionOrderRecord {
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
     completedAt: data.completedAt ? toIso(data.completedAt) : null,
+    sicarPosting: sicarPosting
+      ? {
+          ainId: toNumber(sicarPosting.ainId),
+          comment: String(sicarPosting.comment ?? ""),
+          postedAt: toIso(sicarPosting.postedAt),
+          requestId: String(sicarPosting.requestId ?? ""),
+          reused: toBoolean(sicarPosting.reused),
+        }
+      : null,
+    sicarExclusion: sicarExclusion
+      ? {
+          reason: String(sicarExclusion.reason ?? ""),
+          excludedAt: toIso(sicarExclusion.excludedAt),
+        }
+      : null,
   };
 }
 
@@ -339,19 +362,75 @@ function toOrderListItem(record: ProductionOrderRecord): ProductionOrderListItem
   };
 }
 
-function toHistoryRow(record: ProductionOrderRecord): ProductionHistoryRow {
-  const totals = calculateProductionTotals(record.draft, []);
+function toHistoryRow(
+  record: ProductionOrderRecord,
+  articleProfiles: ArticleProfileDefault[],
+): ProductionHistoryRow {
+  const totals = calculateProductionTotals(record.draft, articleProfiles);
+  const sicarStatusLabel =
+    record.workflowStage === "POSTED_TO_SICAR"
+      ? "SUBIDO A SICAR"
+      : record.workflowStage === "SICAR_EXCLUDED"
+        ? "NO INCLUIDO EN SICAR"
+        : record.workflowStage === "READY_FOR_SICAR"
+          ? "ENVIADO A SICAR"
+          : "PENDIENTE";
 
   return {
     productionOrderId: record.productionOrderId,
     folio: record.folio,
     status: record.status,
+    workflowStage: record.workflowStage,
     scheduledAt: record.createdAt,
     completedAt: record.completedAt,
+    updatedAt: record.updatedAt,
     outputLines: record.draft.outputs.filter((output) => output.article).length,
     inputLines: record.draft.inputs.length + record.draft.manualCosts.length,
     movementLines: 0,
     estimatedTotalCost: totals.totalCost,
+    sourceLabel: record.draft.sourceProduct
+      ? `${record.draft.sourceProduct.clave} - ${record.draft.sourceProduct.descripcion}`
+      : "Produccion sin base",
+    sourceWeight: totals.sourceWeight,
+    producedWeight: totals.producedWeight,
+    sourceConsumption: [
+      ...(record.draft.sourceProduct
+        ? [
+            {
+              label: `${record.draft.sourceProduct.clave} - ${record.draft.sourceProduct.descripcion}`,
+              quantity: totals.sourceWeight,
+              unitName: record.draft.sourceProduct.unidadVenta || "LB",
+              unitCost: totals.sourceUnitCost,
+              totalCost: totals.sourceTotal,
+            },
+          ]
+        : []),
+      ...totals.inputRows.map((row) => ({
+        label: row.label,
+        quantity: row.weight,
+        unitName: record.draft.inputs.find((input) => input.id === row.id)?.unitName || "PZA",
+        unitCost: row.unitCost,
+        totalCost: row.total,
+      })),
+    ],
+    outputEntries: totals.outputs.map((output) => ({
+      label: output.label,
+      quantity: output.weight,
+      unitName:
+        record.draft.outputs.find((item) => item.id === output.id)?.article?.unidadVenta || "LB",
+      producedUnitCost: output.producedUnitCost,
+      allocatedCost: output.allocatedCost,
+    })),
+    manualCostEntries: record.draft.manualCosts.map((item) => ({
+      label: item.label || "Costo adicional",
+      multiplier: toNumber(item.multiplier),
+      cost: toNumber(item.cost),
+      totalCost: toNumber(item.multiplier) * toNumber(item.cost),
+    })),
+    sicarStatusLabel,
+    sicarAinId: record.sicarPosting?.ainId ?? null,
+    sicarComment: record.sicarPosting?.comment ?? "",
+    excludedReason: record.sicarExclusion?.reason ?? null,
     notes: record.draft.sourceProduct
       ? `${record.draft.sourceProduct.clave} - ${record.draft.sourceProduct.descripcion}`
       : "",
@@ -740,7 +819,14 @@ export async function listCloudProductionOrders() {
   const snapshot = await getDocs(
     query(collection(db, COLLECTIONS.productionOrders), orderBy("productionOrderId", "desc"), limit(200)),
   );
-  return snapshot.docs.map(mapOrderDoc).map(toOrderListItem);
+
+  return snapshot.docs
+    .map(mapOrderDoc)
+    .filter(
+      (record) =>
+        record.workflowStage !== "POSTED_TO_SICAR" && record.workflowStage !== "SICAR_EXCLUDED",
+    )
+    .map(toOrderListItem);
 }
 
 export async function getCloudProductionOrderRecord(productionOrderId: number) {
@@ -796,10 +882,14 @@ export async function updateCloudProductionOrderCosting(
 
 export async function listCloudProductionHistory() {
   const db = getDb();
-  const snapshot = await getDocs(
-    query(collection(db, COLLECTIONS.productionOrders), orderBy("productionOrderId", "desc"), limit(200)),
-  );
-  return snapshot.docs.map(mapOrderDoc).map(toHistoryRow);
+  const [snapshot, articleProfiles] = await Promise.all([
+    getDocs(
+      query(collection(db, COLLECTIONS.productionOrders), orderBy("productionOrderId", "desc"), limit(200)),
+    ),
+    listCloudArticleProfiles(),
+  ]);
+
+  return snapshot.docs.map(mapOrderDoc).map((record) => toHistoryRow(record, articleProfiles));
 }
 
 export async function listCloudSicarPostingPreviews(articleProfiles: ArticleProfileDefault[]) {
@@ -810,7 +900,7 @@ export async function listCloudSicarPostingPreviews(articleProfiles: ArticleProf
 
   return snapshot.docs
     .map(mapOrderDoc)
-    .filter((record) => record.workflowStage !== "PRODUCED")
+    .filter((record) => record.status === "IN_PROGRESS" && record.workflowStage === "COSTED")
     .map((record) => toPostingPreview(record, articleProfiles));
 }
 
@@ -833,6 +923,16 @@ export async function requestCloudSicarPosting(productionOrderIds: number[]) {
         throw new Error(`Produccion ${productionOrderId} no encontrada.`);
       }
 
+      const orderData = orderSnapshot.data() as Record<string, unknown>;
+
+      if (String(orderData.workflowStage ?? "") === "POSTED_TO_SICAR") {
+        throw new Error(`La produccion ${productionOrderId} ya fue subida a SICAR.`);
+      }
+
+      if (String(orderData.workflowStage ?? "") === "SICAR_EXCLUDED") {
+        throw new Error(`La produccion ${productionOrderId} esta excluida de SICAR.`);
+      }
+
       const requestRef = doc(db, COLLECTIONS.sicarPostingRequests, String(productionOrderId));
       const requestSnapshot = await getDoc(requestRef);
       const requestData = requestSnapshot.data() as Record<string, unknown> | undefined;
@@ -853,6 +953,70 @@ export async function requestCloudSicarPosting(productionOrderIds: number[]) {
           productionOrderId,
           status: "PENDING",
           requestedAt: now,
+          updatedAt: now,
+          createdAt: requestSnapshot.exists() ? requestData?.createdAt ?? now : now,
+        },
+        { merge: true },
+      );
+    }),
+  );
+
+  return { ok: true, count: ids.length };
+}
+
+export async function excludeCloudProductionFromSicar(
+  productionOrderIds: number[],
+  reason: string,
+) {
+  const ids = [...new Set(productionOrderIds.filter((value) => Number(value) > 0))];
+  const normalizedReason = reason.trim();
+
+  if (ids.length === 0) {
+    throw new Error("Selecciona al menos una produccion.");
+  }
+
+  if (!normalizedReason) {
+    throw new Error("Escribe un motivo para excluir de SICAR.");
+  }
+
+  const db = getDb();
+  const now = nowIso();
+
+  await Promise.all(
+    ids.map(async (productionOrderId) => {
+      const orderRef = doc(db, COLLECTIONS.productionOrders, String(productionOrderId));
+      const orderSnapshot = await getDoc(orderRef);
+
+      if (!orderSnapshot.exists()) {
+        throw new Error(`Produccion ${productionOrderId} no encontrada.`);
+      }
+
+      const requestRef = doc(db, COLLECTIONS.sicarPostingRequests, String(productionOrderId));
+      const requestSnapshot = await getDoc(requestRef);
+      const requestData = requestSnapshot.data() as Record<string, unknown> | undefined;
+
+      await setDoc(
+        orderRef,
+        {
+          status: "COMPLETED",
+          workflowStage: "SICAR_EXCLUDED",
+          updatedAt: now,
+          sicarExclusion: {
+            reason: normalizedReason,
+            excludedAt: now,
+          },
+        },
+        { merge: true },
+      );
+
+      await setDoc(
+        requestRef,
+        {
+          requestId: String(productionOrderId),
+          productionOrderId,
+          status: "EXCLUDED",
+          exclusionReason: normalizedReason,
+          excludedAt: now,
           updatedAt: now,
           createdAt: requestSnapshot.exists() ? requestData?.createdAt ?? now : now,
         },

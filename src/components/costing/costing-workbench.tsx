@@ -53,6 +53,10 @@ type ApiResult = {
   recipeName?: string;
 };
 
+function isClosedOutFromCosting(workflowStage: string | null | undefined) {
+  return workflowStage === "POSTED_TO_SICAR" || workflowStage === "SICAR_EXCLUDED";
+}
+
 export function CostingWorkbench({
   articleProfiles,
   catalogOptions,
@@ -87,7 +91,12 @@ export function CostingWorkbench({
     liveManualCostItems.length > 0 ? liveManualCostItems : manualCostItems;
   const availableOrders = liveOrders.length > 0 ? liveOrders : orders;
   const availableRecipes = liveRecipes.length > 0 ? liveRecipes : recipes;
-  const effectiveSelectedOrder = liveSelectedOrder ?? initialSelectedOrder;
+  const effectiveSelectedOrder =
+    liveSelectedOrder && !isClosedOutFromCosting(liveSelectedOrder.workflowStage)
+      ? liveSelectedOrder
+      : initialSelectedOrder && !isClosedOutFromCosting(initialSelectedOrder.workflowStage)
+        ? initialSelectedOrder
+        : null;
   const selectedOrder = effectiveSelectedOrder;
 
   useEffect(() => {
@@ -122,7 +131,11 @@ export function CostingWorkbench({
         if (nextOrderId) {
           const nextSelectedOrder = await getCloudProductionOrderRecord(nextOrderId).catch(() => null);
           if (!cancelled) {
-            setLiveSelectedOrder(nextSelectedOrder);
+            setLiveSelectedOrder(
+              nextSelectedOrder && !isClosedOutFromCosting(nextSelectedOrder.workflowStage)
+                ? nextSelectedOrder
+                : null,
+            );
           }
         }
       } catch {

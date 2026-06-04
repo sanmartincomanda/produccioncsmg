@@ -87,12 +87,41 @@ export type ProductionHistoryRow = {
   productionOrderId: number;
   folio: string;
   status: string;
+  workflowStage: ProductionWorkflowStage;
   scheduledAt: string | null;
   completedAt: string | null;
+  updatedAt: string;
   outputLines: number;
   inputLines: number;
   movementLines: number;
   estimatedTotalCost: number;
+  sourceLabel: string;
+  sourceWeight: number;
+  producedWeight: number;
+  sourceConsumption: Array<{
+    label: string;
+    quantity: number;
+    unitName: string;
+    unitCost: number;
+    totalCost: number;
+  }>;
+  outputEntries: Array<{
+    label: string;
+    quantity: number;
+    unitName: string;
+    producedUnitCost: number;
+    allocatedCost: number;
+  }>;
+  manualCostEntries: Array<{
+    label: string;
+    multiplier: number;
+    cost: number;
+    totalCost: number;
+  }>;
+  sicarStatusLabel: string;
+  sicarAinId: number | null;
+  sicarComment: string;
+  excludedReason: string | null;
   notes: string;
 };
 
@@ -100,7 +129,8 @@ export type ProductionWorkflowStage =
   | "PRODUCED"
   | "COSTED"
   | "READY_FOR_SICAR"
-  | "POSTED_TO_SICAR";
+  | "POSTED_TO_SICAR"
+  | "SICAR_EXCLUDED";
 
 export type ProductionOrderListItem = {
   productionOrderId: number;
@@ -124,6 +154,17 @@ export type ProductionOrderRecord = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  sicarPosting?: {
+    ainId: number;
+    comment: string;
+    postedAt: string;
+    requestId: string;
+    reused?: boolean;
+  } | null;
+  sicarExclusion?: {
+    reason: string;
+    excludedAt: string;
+  } | null;
 };
 
 export type ProductionRecipeTemplateInput = {
