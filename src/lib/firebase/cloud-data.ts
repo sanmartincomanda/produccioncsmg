@@ -141,9 +141,7 @@ function sanitizeDocId(value: string) {
   return value.trim().replace(/[^\w-]+/gu, "_").toLowerCase();
 }
 
-function mapCatalogItemDoc(snapshot: QueryDocumentSnapshot): SicarCatalogItem {
-  const data = snapshot.data() as Record<string, unknown>;
-
+function mapCatalogItemData(data: Record<string, unknown>): SicarCatalogItem {
   return {
     artId: toNumber(data.artId),
     clave: String(data.clave ?? ""),
@@ -166,6 +164,10 @@ function mapCatalogItemDoc(snapshot: QueryDocumentSnapshot): SicarCatalogItem {
     unidadCompra: String(data.unidadCompra ?? ""),
     unidadVenta: String(data.unidadVenta ?? ""),
   };
+}
+
+function mapCatalogItemDoc(snapshot: QueryDocumentSnapshot): SicarCatalogItem {
+  return mapCatalogItemData(snapshot.data() as Record<string, unknown>);
 }
 
 function toCatalogOption(item: SicarCatalogItem): CatalogOption {
@@ -529,11 +531,31 @@ async function nextProductionIdentifiers() {
 }
 
 export async function listCloudCatalogItems() {
-  const db = getDb();
-  const snapshot = await getDocs(
-    query(collection(db, COLLECTIONS.catalogItems), orderBy("clave", "asc"), limit(1500)),
-  );
-  return snapshot.docs.map(mapCatalogItemDoc);
+  try {
+    const db = getDb();
+    const snapshot = await getDocs(
+      query(collection(db, COLLECTIONS.catalogItems), orderBy("clave", "asc"), limit(3000)),
+    );
+    return snapshot.docs.map(mapCatalogItemDoc);
+  } catch {
+    const response = await fetch("/api/catalogo?limit=3000", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error("No fue posible consultar el catalogo sincronizado.");
+    }
+
+    const payload = (await response.json()) as SicarCatalogResult & {
+      error?: string;
+    };
+
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+
+    return payload.rows.map((row) => mapCatalogItemData(row as unknown as Record<string, unknown>));
+  }
 }
 
 export async function listCloudCatalogOptions() {
